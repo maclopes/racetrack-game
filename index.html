@@ -1,9 +1,11 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Racetrack Vector Game - Multiplayer Edition (v0.2)</title>
+    <title>Racetrack Vector Game - Multiplayer Edition (v0.4)</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Load Firebase Modules (MUST be the specified version) -->
@@ -79,7 +81,7 @@
 <body class="bg-gray-50 font-sans p-4 min-h-screen flex items-center justify-center">
 
     <div class="w-full max-w-5xl bg-white shadow-2xl rounded-xl p-6 md:p-8">
-        <h1 class="text-4xl font-extrabold text-center mb-2 text-indigo-800">Racetrack Multiplayer (v0.2)</h1>
+        <h1 class="text-4xl font-extrabold text-center mb-2 text-indigo-800">Racetrack Multiplayer (v0.4)</h1>
         <p class="text-center text-gray-600 mb-6">Play with a friend by sharing a unique 5-character Game ID.</p>
         
         <!-- Game ID and Status Bar -->
@@ -165,9 +167,6 @@
 
     <script type="text/javascript">
         // --- Global Variables (Provided by Canvas Environment) ---
-        // NOTE: For Vercel/GitHub Pages deployment, replace these lines with your actual Firebase project configuration:
-        // const appId = "YOUR_FIREBASE_PROJECT_ID";
-        // const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", ... };
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = {
           apiKey: "AIzaSyBbPPqXwBjuWSl6o8X78aFH5Z8UYSJRmCs",
@@ -178,7 +177,6 @@
           appId: "1:20754981579:web:c2976d04b2f3c1890eb14e",
           measurementId: "G-RR14KHE4CW"
         };
-        
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // --- Firebase Setup ---
@@ -324,6 +322,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         }
         
         function getInitialVelocity() {
+            // This is the v0.1 initial velocity
             return { dx: 1, dy: -1 };
         }
 
@@ -605,6 +604,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             drawGrid();
 
             // 2. Draw Moves (if it's my turn)
+            calculatePossibleMoves(); // Always calculate before rendering
             drawPossibleMoves();
 
             // 3. Draw Cars (last, so they are on top)
@@ -642,7 +642,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             const statusEl = document.getElementById('statusMessage');
             const crashEl = document.getElementById('crashMessage');
 
-            // FIX: Explicitly check for P1_won or P2_won to avoid misinterpreting 'lobby' as a loss.
+            // Explicitly check for P1_won or P2_won
             if (gameState.status === 'P1_won' || gameState.status === 'P2_won') {
                 const winnerId = gameState.status === 'P1_won' ? 1 : 2;
                 const winnerColor = winnerId === 1 ? 'Blue' : 'Red';
@@ -687,8 +687,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 statusEl.textContent = `Opponent's Turn... ${playerTurnV} | ${nextGoal}`;
             }
 
-            // Re-calculate and draw only when necessary (e.g., end of move/sync)
-            calculatePossibleMoves();
+            // Draw and center view
             render();
             centerViewOnPlayer();
         }
@@ -715,13 +714,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 newPlayerState.safe = true;
             } else {
                 // Illegal move (crash/speed): reset position and velocity
-                newPlayerState.prevPos = newPlayerState.pos; // Keep previous position for path drawing
+                newPlayerState.prevPos = newPlayerState.pos; 
                 newPlayerState.v = { dx: 0, dy: 0 };
-                newPlayerState.safe = false; // Mark as unsafe/crashed
-                
-                // If the game allows repositioning after a crash, you might use:
-                // newPlayerState.pos = move.crashPos; 
-                // For now, we keep the position and just reset V
+                newPlayerState.safe = false; 
             }
             
             // Create the update object
@@ -741,44 +736,43 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             }
         }
         
-function handleCanvasClick(event) {
-    if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) {
-        // Not the player's turn, not in 'playing' state, or waiting for P2
-        return;
-    }
+        function handleCanvasClick(event) {
+            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) {
+                // Not the player's turn, not in 'playing' state, or waiting for P2
+                return;
+            }
 
-    // FIX: Use event.offsetX and event.offsetY.
-    // These properties give coordinates relative to the top-left corner of the canvas element itself,
-    // which correctly handles scrolling in the parent container.
-    const xGrid = event.offsetX / CELL_SIZE;
-    const yGrid = event.offsetY / CELL_SIZE;
+            // Using event.offsetX and event.offsetY ensures coordinates are relative
+            // to the canvas element, regardless of scrolling/offset from the viewport.
+            const xGrid = event.offsetX / CELL_SIZE;
+            const yGrid = event.offsetY / CELL_SIZE;
 
-    // Click tolerance in grid units (e.g., within 1/4 of a cell radius)
-    const clickTolerance = 0.25;
+            // Click tolerance in grid units (e.g., within 1/4 of a cell radius)
+            const clickTolerance = 0.25;
 
-    for (const move of allProjectedMoves) {
-        let targetPos;
+            for (const move of allProjectedMoves) {
+                let targetPos;
 
-        if (move.isSafe) {
-            // Target for safe moves (green dot) is the projected position (x.5, y.5)
-            targetPos = move.pos;
-        } else {
-            // Target for illegal moves (red X) is the center of the crash cell
-            // crashPos holds the integer (x, y) of the crash cell. Add 0.5 for center.
-            targetPos = { x: move.crashPos.x + 0.5, y: move.crashPos.y + 0.5 };
+                if (move.isSafe) {
+                    // Target for safe moves (green dot) is the projected position (x.5, y.5)
+                    targetPos = move.pos;
+                } else {
+                    // Target for illegal moves (red X) is the center of the crash cell
+                    // crashPos holds the integer (x, y) of the crash cell. Add 0.5 for center.
+                    targetPos = { x: move.crashPos.x + 0.5, y: move.crashPos.y + 0.5 };
+                }
+
+                // Check distance using Pythagorean theorem (Euclidean distance)
+                const distance = Math.sqrt(
+                    Math.pow(xGrid - targetPos.x, 2) + Math.pow(yGrid - targetPos.y, 2)
+                );
+
+                if (distance < clickTolerance) {
+                    applyMove(move);
+                    return; 
+                }
+            }
         }
-
-        // Check distance using Pythagorean theorem (Euclidean distance)
-        const distance = Math.sqrt(
-            Math.pow(xGrid - targetPos.x, 2) + Math.pow(yGrid - targetPos.y, 2)
-        );
-
-        if (distance < clickTolerance) {
-            applyMove(move);
-            return; 
-        }
-    }
-}
 
         // --- Firebase Handlers ---
 
@@ -826,6 +820,9 @@ function handleCanvasClick(event) {
             const newHash = generateGameHash();
             const p1Start = track.startPositions.player1;
             const p2Start = track.startPositions.player2;
+            
+            // Reverting to V0.1 movement: Starting with non-zero initial velocity
+            const initialV = getInitialVelocity(); // { dx: 1, dy: -1 }
 
             const newGameState = {
                 gameHash: newHash,
@@ -834,8 +831,10 @@ function handleCanvasClick(event) {
                 player1Id: userId,
                 player2Id: null,
                 players: [
-                    { id: 1, pos: p1Start, prevPos: p1Start, v: { dx: 0, dy: 0 }, nextWaypointIndex: 0, safe: true },
-                    { id: 2, pos: p2Start, prevPos: p2Start, v: { dx: 0, dy: 0 }, nextWaypointIndex: 0, safe: true }
+                    // Player 1 (Blue) starts with the initial velocity
+                    { id: 1, pos: p1Start, prevPos: p1Start, v: initialV, nextWaypointIndex: 0, safe: true },
+                    // Player 2 (Red) also starts with the same initial velocity
+                    { id: 2, pos: p2Start, prevPos: p2Start, v: initialV, nextWaypointIndex: 0, safe: true }
                 ]
             };
 
@@ -982,5 +981,3 @@ function handleCanvasClick(event) {
     </script>
 </body>
 </html>
-
-
