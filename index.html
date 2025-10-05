@@ -659,7 +659,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
         // --- UI Update & Game Status ---
 
-        function updateUI() {
+ function updateUI() {
             if (!gameState) return;
 
             document.getElementById('gameIdDisplay').textContent = `ID: ${gameState.gameHash}`;
@@ -671,8 +671,8 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             const statusEl = document.getElementById('statusMessage');
             const crashEl = document.getElementById('crashMessage');
 
-            // Handle Game Over
-            if (gameState.status !== 'playing') {
+            // FIX: Explicitly check for P1_won or P2_won to avoid misinterpreting 'lobby' as a loss.
+            if (gameState.status === 'P1_won' || gameState.status === 'P2_won') {
                 const winnerId = gameState.status === 'P1_won' ? 1 : 2;
                 const winnerColor = winnerId === 1 ? 'Blue' : 'Red';
                 statusEl.className = "p-4 font-bold text-center rounded-xl bg-green-100 text-green-800 border-4 border-green-500 text-2xl animate-pulse";
@@ -682,7 +682,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 return;
             }
 
-            // Handle Waiting for Opponent
+            // Handle Waiting for Opponent (Status is 'lobby')
             if (!gameState.player2Id) {
                 statusEl.className = "p-3 font-semibold text-center rounded-lg bg-yellow-100 text-yellow-800 border border-yellow-300";
                 statusEl.textContent = "Waiting for an opponent to join...";
@@ -693,7 +693,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             document.getElementById('resetText').textContent = 'Forfeit & Start New Game';
 
 
-            // Handle Turn
+            // Handle Turn (Status must be 'playing' at this point)
             const playerTurnV = `(V: ${currentTurnPlayer.v.dx}, ${currentTurnPlayer.v.dy})`;
             let nextGoal = '';
             if (currentTurnPlayer.nextWaypointIndex < WAYPOINT_SEQUENCE.length) {
@@ -721,7 +721,6 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             render();
             centerViewOnPlayer();
         }
-
         // --- Game Move and Firebase Update ---
 
         async function makeMove(ax, ay) {
