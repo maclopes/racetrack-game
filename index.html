@@ -169,8 +169,6 @@
         // const appId = "YOUR_FIREBASE_PROJECT_ID";
         // const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", ... };
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        // Your web app's Firebase configuration
-        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
         const firebaseConfig = {
           apiKey: "AIzaSyBbPPqXwBjuWSl6o8X78aFH5Z8UYSJRmCs",
           authDomain: "racetrack-game-9059c.firebaseapp.com",
@@ -445,65 +443,75 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 isWin: isWin,
                 ax: ax,
                 ay: ay,
-                v: projectedV, 
+                v: projectedV,
                 nextWaypointIndex: nextWaypointIndex
             };
         }
 
         function calculatePossibleMoves() {
             allProjectedMoves = [];
-            if (!gameState || gameState.status !== 'playing' || gameState.currentTurn !== myPlayerId) return;
+            
+            if (!gameState || gameState.currentTurn !== myPlayerId) return;
 
-            const currentPlayerState = gameState.players.find(p => p.id === myPlayerId);
+            const myState = gameState.players.find(p => p.id === myPlayerId);
+            if (!myState) return;
+
+            const mockPlayerState = {
+                pos: myState.pos,
+                v: myState.v,
+                nextWaypointIndex: myState.nextWaypointIndex,
+                prevPos: myState.prevPos
+            };
 
             ACCELERATIONS.forEach(accel => {
-                const mockState = { 
-                    pos: currentPlayerState.pos, 
-                    v: currentPlayerState.v, 
-                    prevPos: currentPlayerState.pos, // Needed for win/waypoint check
-                    nextWaypointIndex: currentPlayerState.nextWaypointIndex
-                };
-                const result = getProjectedMove(mockState, accel.ax, accel.ay);
-                allProjectedMoves.push(result);
+                allProjectedMoves.push(getProjectedMove(mockPlayerState, accel.ax, accel.ay));
             });
         }
-
-        // --- Drawing/Rendering (Adapted from v0.1) ---
         
-        function centerViewOnPlayer() {
-            if (!gameState || gameState.status !== 'playing') return;
+        // --- Drawing Functions ---
 
-            const playerState = gameState.players.find(p => p.id === myPlayerId);
-            if (!playerState) return;
+        function drawGrid() {
+            ctx.strokeStyle = '#cccccc'; // Light gray for grid lines
+            ctx.lineWidth = 0.5;
 
-            const playerCenterX = playerState.pos.x * CELL_SIZE;
-            const playerCenterY = playerState.pos.y * CELL_SIZE;
+            // Draw horizontal lines
+            for (let y = 0; y <= GRID_HEIGHT; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * CELL_SIZE);
+                ctx.lineTo(CANVAS_WIDTH, y * CELL_SIZE);
+                ctx.stroke();
+            }
 
-            const containerWidth = canvasContainer.clientWidth;
-            const containerHeight = canvasContainer.clientHeight;
-
-            const targetScrollX = playerCenterX - (containerWidth / 2);
-            const targetScrollY = playerCenterY - (containerHeight / 2);
-
-            canvasContainer.scrollLeft = targetScrollX;
-            canvasContainer.scrollTop = targetScrollY;
+            // Draw vertical lines
+            for (let x = 0; x <= GRID_WIDTH; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * CELL_SIZE, 0);
+                ctx.lineTo(x * CELL_SIZE, CANVAS_HEIGHT);
+                ctx.stroke();
+            }
         }
 
-        function drawWaypoints(currentPlayerState) {
+        function drawTrack() {
             for (let y = 0; y < GRID_HEIGHT; y++) {
                 for (let x = 0; x < GRID_WIDTH; x++) {
                     const tile = track.map[y][x];
+                    ctx.fillStyle = '#ffffff'; // Default to white for '.' (track)
                     
-                    if (tile === '1' || tile === '2' || tile === '3') {
-                        const requiredTile = currentPlayerState.nextWaypointIndex < WAYPOINT_SEQUENCE.length 
-                            ? WAYPOINT_SEQUENCE[currentPlayerState.nextWaypointIndex] : null;
-
-                        let color = (requiredTile === tile) ? '#fcd34d' : '#fed7aa';
-
-                        ctx.fillStyle = color;
-                        ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE); 
-
-                        ctx.fillStyle = '#ea580c';
+                    if (tile === 'X') {
+                        ctx.fillStyle = '#1f2937'; // Dark gray for 'X' (wall)
+                    } else if (tile.match(/[1-3]/)) {
+                        ctx.fillStyle = '#fef3c7'; // Light yellow for Waypoints
+                    } else if (tile === 'S') {
+                        ctx.fillStyle = '#d1fae5'; // Light green for Finish/Start area
+                    } else if (tile === 'A' || tile === 'B') {
+                        ctx.fillStyle = '#99f6e4'; // Teal for initial start positions
+                    }
+                    
+                    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    
+                    // Draw checkpoint numbers
+                    if (tile.match(/[1-3]/)) {
+                        ctx.fillStyle = '#92400e'; 
                         ctx.font = `${CELL_SIZE * 0.7}px Arial`;
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
@@ -513,153 +521,116 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             }
         }
 
-        function drawTrack() {
-            const CELL = CELL_SIZE;
-            const currentPlayerState = gameState.players.find(p => p.id === myPlayerId);
-
-            for (let y = 0; y < GRID_HEIGHT; y++) {
-                for (let x = 0; x < GRID_WIDTH; x++) {
-                    const tile = track.map[y][x];
-                    let color = '';
-
-                    switch (tile) {
-                        case 'X':
-                            color = '#4b5563'; 
-                            break;
-                        case '.':
-                        case 'A': 
-                        case 'B':
-                            color = '#e5e7eb'; 
-                            break;
-                        case 'S':
-                            color = '#a7f3d0';
-                            break;
-                        default:
-                             if (tile !== '1' && tile !== '2' && tile !== '3') {
-                                 continue;
-                             }
-                             color = '#e5e7eb'; 
-                    }
-                    
-                    if (tile !== '1' && tile !== '2' && tile !== '3') {
-                        ctx.fillStyle = color;
-                        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
-                    }
-                }
-            }
-            drawWaypoints(currentPlayerState);
-        }
-
         function drawPossibleMoves() {
-            if (!gameState || gameState.currentTurn !== myPlayerId) return;
-
-            const currentPlayerState = gameState.players.find(p => p.id === myPlayerId);
-            const playerColor = currentPlayerState.id === 1 ? '#3b82f6' : '#ef4444';
-            const CELL = CELL_SIZE;
-
+            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) return;
+            
             allProjectedMoves.forEach(move => {
-                if (move.isSafe || move.isWin) {
-                    ctx.fillStyle = playerColor + '80'; 
-                    const x = move.pos.x * CELL;
-                    const y = move.pos.y * CELL;
-                    ctx.beginPath();
-                    ctx.arc(x, y, CELL * 0.25, 0, Math.PI * 2); 
-                    ctx.fill();
-                } else {
-                    if (move.crashPos) {
-                        const crashX = move.crashPos.x;
-                        const crashY = move.crashPos.y;
-                        const x = crashX * CELL + CELL / 2;
-                        const y = crashY * CELL + CELL / 2;
+                const centerX = move.pos.x * CELL_SIZE;
+                const centerY = move.pos.y * CELL_SIZE;
 
-                        // Red 'X' clickable target
-                        ctx.strokeStyle = '#ef4444'; 
-                        ctx.lineWidth = 3;
-                        ctx.beginPath();
-                        ctx.rect(crashX * CELL + 2, crashY * CELL + 2, CELL - 4, CELL - 4);
-                        ctx.stroke();
-                        ctx.beginPath();
-                        ctx.moveTo(x - CELL * 0.3, y - CELL * 0.3);
-                        ctx.lineTo(x + CELL * 0.3, y + CELL * 0.3);
-                        ctx.moveTo(x + CELL * 0.3, y - CELL * 0.3);
-                        ctx.lineTo(x - CELL * 0.3, y + CELL * 0.3);
-                        ctx.stroke();
-                    }
+                if (move.isSafe) {
+                    // Draw Green Dot for Safe Moves
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, CELL_SIZE / 4, 0, Math.PI * 2);
+                    ctx.fillStyle = move.isWin ? '#10b981' : '#10b981'; // Green (darker for win)
+                    ctx.fill();
+                    
+                    // Draw velocity line (P->P')
+                    const playerState = gameState.players.find(p => p.id === myPlayerId);
+                    ctx.strokeStyle = '#10b981';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(playerState.pos.x * CELL_SIZE, playerState.pos.y * CELL_SIZE);
+                    ctx.lineTo(centerX, centerY);
+                    ctx.stroke();
+
+                } else {
+                    // Draw Red 'X' for Crash/Illegal Moves
+                    const crashX = (move.crashPos.x + 0.5) * CELL_SIZE;
+                    const crashY = (move.crashPos.y + 0.5) * CELL_SIZE;
+                    const size = CELL_SIZE / 3;
+
+                    ctx.strokeStyle = '#ef4444'; // Red
+                    ctx.lineWidth = 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(crashX - size, crashY - size);
+                    ctx.lineTo(crashX + size, crashY + size);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(crashX + size, crashY - size);
+                    ctx.lineTo(crashX - size, crashY + size);
+                    ctx.stroke();
                 }
             });
         }
 
         function drawCars() {
-            gameState.players.forEach(player => {
-                const playerColor = player.id === 1 ? '#3b82f6' : '#ef4444';
-                const x = player.pos.x * CELL_SIZE;
-                const y = player.pos.y * CELL_SIZE;
-                
-                // Draw path line (using prevPos from state)
-                if (player.prevPos.x !== player.pos.x || player.prevPos.y !== player.pos.y) {
-                    ctx.strokeStyle = playerColor + '80'; 
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(player.prevPos.x * CELL_SIZE, player.prevPos.y * CELL_SIZE);
-                    ctx.lineTo(x, y);
-                    ctx.stroke();
-                }
+            if (!gameState) return;
 
-                // Draw the car (circle)
+            gameState.players.forEach(player => {
+                const color = player.id === 1 ? '#3b82f6' : '#ef4444'; // Blue or Red
+                const radius = CELL_SIZE / 3;
+                const centerX = player.pos.x * CELL_SIZE;
+                const centerY = player.pos.y * CELL_SIZE;
+
+                // Draw Car Body
                 ctx.beginPath();
-                ctx.arc(x, y, CELL_SIZE * 0.4, 0, Math.PI * 2);
-                ctx.fillStyle = playerColor;
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = color;
                 ctx.fill();
-                ctx.strokeStyle = 'black';
-                ctx.lineWidth = 1.5;
+                
+                // Draw outline for definition
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 1;
                 ctx.stroke();
 
-                // Draw crash marker if applicable
-                if (!player.safe && gameState.status === 'playing') {
-                     ctx.strokeStyle = '#f87171'; 
-                     ctx.lineWidth = 3;
-                     ctx.beginPath();
-                     ctx.moveTo(x - CELL_SIZE * 0.4, y - CELL_SIZE * 0.4);
-                     ctx.lineTo(x + CELL_SIZE * 0.4, y + CELL_SIZE * 0.4);
-                     ctx.moveTo(x + CELL_SIZE * 0.4, y - CELL_SIZE * 0.4);
-                     ctx.lineTo(x - CELL_SIZE * 0.4, y + CELL_SIZE * 0.4);
-                     ctx.stroke();
+                // Draw velocity vector (P->V)
+                if (player.v.dx !== 0 || player.v.dy !== 0) {
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + player.v.dx * CELL_SIZE, centerY + player.v.dy * CELL_SIZE);
+                    ctx.stroke();
                 }
             });
         }
 
-        function drawGrid() {
-            ctx.strokeStyle = '#cccccc'; 
-            ctx.lineWidth = 0.5;
-
-            for (let x = 0; x <= GRID_WIDTH; x++) {
-                ctx.beginPath();
-                ctx.moveTo(x * CELL_SIZE, 0);
-                ctx.lineTo(x * CELL_SIZE, CANVAS_HEIGHT);
-                ctx.stroke();
-            }
-
-            for (let y = 0; y <= GRID_HEIGHT; y++) {
-                ctx.beginPath();
-                ctx.moveTo(0, y * CELL_SIZE);
-                ctx.lineTo(CANVAS_WIDTH, y * CELL_SIZE);
-                ctx.stroke();
-            }
-        }
-
         function render() {
-            if (!gameState || GRID_WIDTH === 0) return;
-            
-            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); 
+            // 1. Clear and Draw Track
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
             drawTrack();
             drawGrid();
+
+            // 2. Draw Moves (if it's my turn)
             drawPossibleMoves();
+
+            // 3. Draw Cars (last, so they are on top)
             drawCars();
+        }
+
+        function centerViewOnPlayer() {
+            if (!gameState) return;
+            const myState = gameState.players.find(p => p.id === myPlayerId);
+            if (!myState) return;
+
+            // Target scroll position in pixels
+            const targetX = (myState.pos.x * CELL_SIZE) - (canvasContainer.clientWidth / 2);
+            const targetY = (myState.pos.y * CELL_SIZE) - (canvasContainer.clientHeight / 2);
+
+            // Smooth scroll to the target position
+            canvasContainer.scrollTo({
+                left: targetX,
+                top: targetY,
+                behavior: 'smooth'
+            });
         }
 
         // --- UI Update & Game Status ---
 
- function updateUI() {
+        function updateUI() {
             if (!gameState) return;
 
             document.getElementById('gameIdDisplay').textContent = `ID: ${gameState.gameHash}`;
@@ -721,318 +692,294 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             render();
             centerViewOnPlayer();
         }
-        // --- Game Move and Firebase Update ---
 
-        async function makeMove(ax, ay) {
-            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing') return;
+        // --- Game Actions ---
 
-            const playerIndex = myPlayerId - 1;
-            const currentPlayerState = JSON.parse(JSON.stringify(gameState.players[playerIndex]));
+        async function applyMove(move) {
+            if (!gameState || gameState.currentTurn !== myPlayerId) return;
 
-            // Mock player state for projection
-            const mockState = {
-                pos: currentPlayerState.pos, 
-                v: currentPlayerState.v, 
-                prevPos: currentPlayerState.pos,
-                nextWaypointIndex: currentPlayerState.nextWaypointIndex
-            };
-            const result = getProjectedMove(mockState, ax, ay);
+            const playerIndex = gameState.players.findIndex(p => p.id === myPlayerId);
+            if (playerIndex === -1) return;
 
-            // Create the new state object for the database
-            let newPlayerState = { ...currentPlayerState };
-            let newStatus = 'playing';
-            let newTurn = (myPlayerId === 1) ? 2 : 1;
-            
-            if (result.isWin) {
-                newPlayerState.v = result.v;
-                newPlayerState.prevPos = newPlayerState.pos; 
-                newPlayerState.pos = result.pos;
+            const nextPlayerId = myPlayerId === 1 ? 2 : 1;
+            const newStatus = move.isWin ? (myPlayerId === 1 ? 'P1_won' : 'P2_won') : 'playing';
+
+            const newPlayerState = { ...gameState.players[playerIndex] };
+
+            if (move.isSafe) {
+                // Safe move: update position, velocity, and waypoint
+                newPlayerState.prevPos = newPlayerState.pos;
+                newPlayerState.pos = move.pos;
+                newPlayerState.v = move.v;
+                newPlayerState.nextWaypointIndex = move.nextWaypointIndex;
                 newPlayerState.safe = true;
-                newStatus = (myPlayerId === 1) ? 'P1_won' : 'P2_won';
-            } else if (!result.isSafe) {
-                // Crash: position remains the same, velocity resets, safe=false
-                newPlayerState.v = { dx: 0, dy: 0 };
-                newPlayerState.safe = false;
             } else {
-                // Safe Move: update all properties
-                newPlayerState.v = result.v;
-                newPlayerState.prevPos = newPlayerState.pos; 
-                newPlayerState.pos = result.pos;
-                newPlayerState.safe = true;
-                newPlayerState.nextWaypointIndex = result.nextWaypointIndex;
+                // Illegal move (crash/speed): reset position and velocity
+                newPlayerState.prevPos = newPlayerState.pos; // Keep previous position for path drawing
+                newPlayerState.v = { dx: 0, dy: 0 };
+                newPlayerState.safe = false; // Mark as unsafe/crashed
+                
+                // If the game allows repositioning after a crash, you might use:
+                // newPlayerState.pos = move.crashPos; 
+                // For now, we keep the position and just reset V
             }
-
-            // Prepare update object for Firestore
+            
+            // Create the update object
             const updates = {
-                [`players.${playerIndex}`]: newPlayerState, // Update specific player state
-                currentTurn: newTurn,
+                currentTurn: newStatus === 'playing' ? nextPlayerId : myPlayerId, // If game over, currentTurn is the winner
                 status: newStatus,
-                lastUpdated: new Date().toISOString()
+                players: [...gameState.players]
             };
+            updates.players[playerIndex] = newPlayerState;
 
-            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games`, gameHash);
             try {
-                // Use updateDoc to apply the move to the shared state
-                await firebase.updateDoc(gameRef, updates);
+                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
+                await firebase.setDoc(gameRef, updates, { merge: true });
             } catch (error) {
-                console.error("Error updating game state:", error);
+                console.error("Error applying move:", error);
+                document.getElementById('statusMessage').textContent = 'Error saving move. Check console.';
             }
-        }
-
-        // --- Firebase Connection and Game Room Management ---
-
-        function getGameCollectionRef() {
-            return firebase.collection(db, `artifacts/${appId}/public/data/racetrack_games`);
         }
         
-        function handleGameData(doc) {
-            if (doc.exists()) {
-                gameState = doc.data();
-                // Ensure players array is correctly structured
-                if (gameState.players && typeof gameState.players[0]?.pos?.x === 'number') {
-                    showView('gameView');
-                    updateUI();
+        function handleCanvasClick(event) {
+            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) {
+                // Not the player's turn, not in 'playing' state, or waiting for P2
+                return;
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            // Calculate coordinates relative to the track's grid (1.0 = one cell)
+            const xGrid = (event.clientX - rect.left) / CELL_SIZE;
+            const yGrid = (event.clientY - rect.top) / CELL_SIZE;
+
+            // Click tolerance in grid units (e.g., within 1/4 of a cell radius)
+            const clickTolerance = 0.25;
+
+            for (const move of allProjectedMoves) {
+                let targetPos;
+
+                if (move.isSafe) {
+                    // Target for safe moves (green dot) is the projected position (x.5, y.5)
+                    targetPos = move.pos;
                 } else {
-                    console.error("Game data is corrupted or incomplete.");
+                    // Target for illegal moves (red X) is the center of the crash cell
+                    // crashPos holds the integer (x, y) of the crash cell. Add 0.5 for center.
+                    targetPos = { x: move.crashPos.x + 0.5, y: move.crashPos.y + 0.5 };
                 }
-            } else {
-                // Game deleted or hash was wrong
-                if (gameListener) gameListener(); // Stop listening
-                gameListener = null;
-                gameState = null;
-                myPlayerId = null;
-                gameHash = null;
-                document.getElementById('connectionStatus').textContent = 'Game deleted or not found.';
-                showView('lobbyView');
+
+                // Check distance using Pythagorean theorem (Euclidean distance)
+                const distance = Math.sqrt(
+                    Math.pow(xGrid - targetPos.x, 2) + Math.pow(yGrid - targetPos.y, 2)
+                );
+
+                if (distance < clickTolerance) {
+                    applyMove(move);
+                    return; 
+                }
             }
         }
 
-        function listenToGame(hash) {
-            if (gameListener) gameListener(); // Stop previous listener
-            gameHash = hash;
-            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games`, hash);
-            gameListener = firebase.onSnapshot(gameRef, handleGameData, (error) => {
-                console.error("Real-time listener failed:", error);
-                document.getElementById('connectionStatus').textContent = 'Lost connection to game.';
-            });
-            document.getElementById('connectionStatus').textContent = `Connected to Game ${hash}.`;
-        }
+        // --- Firebase Handlers ---
 
+        function setupGameListener(hash) {
+            if (gameListener) gameListener(); // Unsubscribe from previous game
+            gameHash = hash;
+
+            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
+
+            gameListener = firebase.onSnapshot(gameRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    gameState = docSnap.data();
+                    gameState.gameHash = hash; // Ensure hash is available on the state object
+                    
+                    // Determine my Player ID (P1 or P2)
+                    if (gameState.player1Id === userId) {
+                        myPlayerId = 1;
+                    } else if (gameState.player2Id === userId) {
+                        myPlayerId = 2;
+                    } else {
+                        // This should not happen if the user is linked to the game
+                        console.error("User not registered as P1 or P2 in this game.");
+                        return;
+                    }
+
+                    showView('gameView');
+                    updateUI();
+
+                } else {
+                    // Game document was deleted (e.g., by P1 reset)
+                    console.log("Game deleted or not found.");
+                    gameState = null;
+                    gameHash = null;
+                    myPlayerId = null;
+                    showView('lobbyView');
+                }
+            }, (error) => {
+                console.error("Firestore error:", error);
+            });
+        }
+        
         async function createGame() {
-            const createSpinner = document.getElementById('createSpinner');
-            createSpinner.style.display = 'inline';
-            document.getElementById('createGameBtn').disabled = true;
+            document.getElementById('createSpinner').style.display = 'inline';
+            
+            const newHash = generateGameHash();
+            const p1Start = track.startPositions.player1;
+            const p2Start = track.startPositions.player2;
+
+            const newGameState = {
+                gameHash: newHash,
+                status: 'lobby', // waiting for player 2
+                currentTurn: 1,
+                player1Id: userId,
+                player2Id: null,
+                players: [
+                    { id: 1, pos: p1Start, prevPos: p1Start, v: { dx: 0, dy: 0 }, nextWaypointIndex: 0, safe: true },
+                    { id: 2, pos: p2Start, prevPos: p2Start, v: { dx: 0, dy: 0 }, nextWaypointIndex: 0, safe: true }
+                ]
+            };
 
             try {
-                const hash = generateGameHash();
-                const startPos1 = track.startPositions.player1;
-                const startPos2 = track.startPositions.player2; 
-                const initialV = getInitialVelocity();
-                
-                const initialGameState = {
-                    gameHash: hash,
-                    player1Id: userId,
-                    player2Id: null, // Waiting for second player
-                    currentTurn: 1,
-                    status: 'lobby',
-                    lastUpdated: new Date().toISOString(),
-                    players: [
-                        { id: 1, pos: startPos1, prevPos: startPos1, v: initialV, safe: true, nextWaypointIndex: 0, color: 'blue' },
-                        { id: 2, pos: startPos2, prevPos: startPos2, v: initialV, safe: true, nextWaypointIndex: 0, color: 'red' }
-                    ]
-                };
-                
-                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games`, hash);
-                await firebase.setDoc(gameRef, initialGameState);
-
-                myPlayerId = 1; // Player 1 is Blue
-                listenToGame(hash);
+                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${newHash}`);
+                await firebase.setDoc(gameRef, newGameState);
+                setupGameListener(newHash);
             } catch (error) {
                 console.error("Error creating game:", error);
-                document.getElementById('connectionStatus').textContent = 'Error creating game.';
             } finally {
-                createSpinner.style.display = 'none';
-                document.getElementById('createGameBtn').disabled = false;
+                document.getElementById('createSpinner').style.display = 'none';
             }
         }
 
         async function joinGame(hash) {
-            hash = hash.toUpperCase();
-            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games`, hash);
-            
+            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${hash}`);
             try {
                 const docSnap = await firebase.getDoc(gameRef);
 
-                if (!docSnap.exists()) {
-                    document.getElementById('connectionStatus').textContent = `Game ID ${hash} not found.`;
-                    return false;
-                }
+                if (docSnap.exists()) {
+                    const existingGame = docSnap.data();
 
-                const game = docSnap.data();
-
-                if (game.player2Id) {
-                    if (game.player1Id === userId || game.player2Id === userId) {
+                    if (existingGame.player2Id === null) {
+                        // Update game to include P2
+                        await firebase.updateDoc(gameRef, {
+                            player2Id: userId,
+                            status: 'playing' // Game starts now
+                        });
+                        setupGameListener(hash);
+                    } else if (existingGame.player1Id === userId || existingGame.player2Id === userId) {
                         // Rejoining existing game
-                        myPlayerId = game.player1Id === userId ? 1 : 2;
+                        setupGameListener(hash);
                     } else {
-                        document.getElementById('connectionStatus').textContent = `Game ID ${hash} is already full.`;
-                        return false;
+                        // Game is full
+                        await customConfirm(`Game ${hash} is already full. Please find another game or create your own.`);
                     }
                 } else {
-                    // Joining as Player 2
-                    await firebase.updateDoc(gameRef, {
-                        player2Id: userId,
-                        status: 'playing',
-                        lastUpdated: new Date().toISOString()
-                    });
-                    myPlayerId = 2; // Player 2 is Red
+                    await customConfirm(`Game ID ${hash} not found.`);
                 }
-
-                listenToGame(hash);
-                return true;
 
             } catch (error) {
                 console.error("Error joining game:", error);
-                document.getElementById('connectionStatus').textContent = 'Error joining game.';
-                return false;
+                await customConfirm("An error occurred while joining the game.");
             }
         }
 
         async function resetGame() {
-            if (!gameState) {
-                showView('lobbyView'); // If no game is active, just go to lobby
-                return;
-            }
+            if (!gameState || !gameHash) return;
 
-            let confirmMessage = "";
-            let shouldDelete = false;
+            const confirmMessage = myPlayerId === 1 && gameState.player2Id
+                ? `Are you sure you want to delete game ${gameHash}? This will end the game for both players.`
+                : `Are you sure you want to forfeit this game and start a new one?`;
 
-            if (gameState.status !== 'playing' && gameState.player1Id === userId && !gameState.player2Id) {
-                confirmMessage = "Are you sure you want to delete this lobby?";
-                shouldDelete = true;
-            } else if (gameState.status !== 'playing') {
-                 confirmMessage = "Are you sure you want to forfeit/start a new game?";
-            } else {
-                confirmMessage = "Warning: Forfeiting will end the current game. Are you sure?";
-            }
-            
             const confirmed = await customConfirm(confirmMessage);
+            if (!confirmed) return;
 
-            if (confirmed) {
-                if (shouldDelete) {
-                    const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games`, gameHash);
-                    try {
-                        await firebase.deleteDoc(gameRef);
-                    } catch (e) {
-                        console.error("Error deleting document:", e);
-                    }
+            try {
+                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
+                
+                if (myPlayerId === 1 && gameState.player2Id) {
+                    // P1 deletes the game
+                    await firebase.deleteDoc(gameRef);
+                } else {
+                    // P2 forfeits / P1 forfeits an empty game (just navigate away)
+                    gameState = null;
+                    gameHash = null;
+                    myPlayerId = null;
+                    if (gameListener) gameListener();
+                    showView('lobbyView');
                 }
-                if (gameListener) gameListener(); 
-                gameListener = null;
-                gameState = null;
-                myPlayerId = null;
-                gameHash = null;
-                document.getElementById('gameIdInput').value = '';
-                document.getElementById('connectionStatus').textContent = 'Ready to play.';
-                showView('lobbyView');
+            } catch (error) {
+                console.error("Error resetting game:", error);
             }
         }
-
-        function handleCanvasClick(event) {
-            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing') return;
-
-            const rect = canvas.getBoundingClientRect();
-            
-            // Adjust coordinates for current scroll and CELL_SIZE
-            const x = (event.clientX - rect.left + canvasContainer.scrollLeft) / CELL_SIZE;
-            const y = (event.clientY - rect.top + canvasContainer.scrollTop) / CELL_SIZE;
-            
-            // Find the closest projected move based on click coordinates
-            const clickedMove = allProjectedMoves.find(move => {
-                const clickDistance = Math.sqrt(
-                    Math.pow(move.pos.x - x, 2) + 
-                    Math.pow(move.pos.y - y, 2)
-                );
-                // Check if click is near the center of the projected move (safe or crash spot)
-                return clickDistance < 0.5; // Radius check
-            });
-
-            if (clickedMove) {
-                // If it's a safe or winning move
-                if (clickedMove.isSafe || clickedMove.isWin) {
-                    makeMove(clickedMove.ax, clickedMove.ay);
-                } 
-                // If it's an illegal/crash move (clicking the red X/square)
-                else if (clickedMove.crashPos) {
-                     // Force acceleration (0, 0) to reset velocity to (0,0) and stay in place
-                    makeMove(0, 0); 
-                }
-            }
-        }
+        
+        // --- Initialization and Event Listeners ---
 
         function initFirebase() {
             if (!firebaseConfig.projectId) {
                 document.getElementById('connectionStatus').textContent = 'ERROR: Firebase config missing.';
                 return;
             }
-            // firebase.setLogLevel('debug'); // Uncomment for debugging Firestore
             
+            // For debugging: Set Firestore log level
+            firebase.setLogLevel('debug');
+
             app = firebase.initializeApp(firebaseConfig);
             db = firebase.getFirestore(app);
             auth = firebase.getAuth(app);
+
+            // CRITICAL STEP: Load track configuration and dimensions early
+            loadTrackConfig(); 
+            render(); 
 
             firebase.onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     userId = user.uid;
                 } else {
-                    // Fallback to anonymous sign-in if no custom token is available
                     try {
-                        const anonUserCredential = await firebase.signInAnonymously(auth);
-                        userId = anonUserCredential.user.uid;
+                        // Use custom token if available (in Canvas environment), otherwise sign in anonymously
+                        if (initialAuthToken) {
+                            const anonUserCredential = await firebase.signInWithCustomToken(auth, initialAuthToken);
+                            userId = anonUserCredential.user.uid;
+                        } else {
+                            const anonUserCredential = await firebase.signInAnonymously(auth);
+                            userId = anonUserCredential.user.uid;
+                        }
                     } catch (error) {
                         console.error("Authentication failed:", error);
-                        document.getElementById('connectionStatus').textContent = 'Authentication Failed.';
+                        document.getElementById('connectionStatus').textContent = 'Authentication Failed. Check Auth settings.';
                         return;
                     }
                 }
                 document.getElementById('connectionStatus').textContent = 'Ready to play.';
-                loadTrackConfig();
                 showView('lobbyView');
             });
         }
-        
-        // --- Event Listeners ---
 
-        document.getElementById('createGameBtn').addEventListener('click', createGame);
-        document.getElementById('joinGameForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const hash = document.getElementById('gameIdInput').value;
-            const success = await joinGame(hash);
-            if (success) {
-                document.getElementById('gameIdInput').value = '';
-            }
-        });
-
-        document.getElementById('resetButton').addEventListener('click', resetGame);
-        canvas.addEventListener('click', handleCanvasClick);
-        
-        // Handle zoom via mouse wheel for better inspection
-        canvasContainer.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1; // Zoom out vs. Zoom in
-            const newCellSize = Math.max(8, Math.min(24, CELL_SIZE * zoomFactor)); // Limit zoom
+        window.onload = function() {
+            // Attach event listeners
+            document.getElementById('createGameBtn').addEventListener('click', createGame);
+            document.getElementById('joinGameForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const hash = document.getElementById('gameIdInput').value.toUpperCase().trim();
+                if (hash.length === 5) {
+                    joinGame(hash);
+                }
+            });
+            document.getElementById('resetButton').addEventListener('click', resetGame);
+            canvas.addEventListener('click', handleCanvasClick);
             
-            if (newCellSize !== CELL_SIZE) {
-                CELL_SIZE = newCellSize;
-                loadTrackConfig(); 
+            // Zoom functionality using mouse wheel
+            canvasContainer.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const newCellSize = CELL_SIZE + (e.deltaY < 0 ? 1 : -1);
+                CELL_SIZE = Math.min(Math.max(10, newCellSize), 30); // Limit zoom range
+                loadTrackConfig(); // Re-calculate canvas dimensions
                 render();
                 centerViewOnPlayer();
-            }
-        });
+            });
 
-        // Initialize on load
-        window.onload = initFirebase;
-
+            initFirebase();
+        }
     </script>
 </body>
 </html>
+
+
