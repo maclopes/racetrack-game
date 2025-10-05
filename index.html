@@ -1,0 +1,981 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Racetrack Vector Game - Multiplayer Edition (v0.4)</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Firebase Modules (MUST be the specified version) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, limit, where, getDocs, updateDoc, writeBatch, deleteDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase objects globally for the main script
+        
+        window.firebase = { 
+            initializeApp, 
+            getAuth, 
+            signInAnonymously, 
+            signInWithCustomToken, 
+            onAuthStateChanged,
+            getFirestore, 
+            doc, 
+            setDoc, 
+            onSnapshot, 
+            collection, 
+            query, 
+            limit, 
+            where, 
+            getDocs,
+            updateDoc,
+            writeBatch,
+            deleteDoc,
+            getDoc,
+            setLogLevel
+        };
+    </script>
+    <style>
+        /* Custom CSS for the canvas and scroll container */
+        #gameCanvas {
+            border: 4px solid #1f2937; /* Dark Gray border */
+            background-color: #e5e7eb; /* Light gray background for the track area */
+            touch-action: manipulation; /* Prevents double-tap zoom on mobile */
+            cursor: pointer; /* Indicate it's interactive */
+            image-rendering: pixelated; 
+        }
+        #canvasContainer {
+            overflow: auto; 
+            max-width: 100%;
+            height: 600px; /* Fixed height for better canvas viewing */
+        }
+        /* Custom alert/confirmation modal styling */
+        #confirmationModal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 font-sans p-4 min-h-screen flex items-center justify-center">
+
+    <div class="w-full max-w-5xl bg-white shadow-2xl rounded-xl p-6 md:p-8">
+        <h1 class="text-4xl font-extrabold text-center mb-2 text-indigo-800">Racetrack Multiplayer (v0.4)</h1>
+        <p class="text-center text-gray-600 mb-6">Play with a friend by sharing a unique 5-character Game ID.</p>
+        
+        <!-- Game ID and Status Bar -->
+        <div id="gameStatusHeader" class="mb-4 p-3 text-center rounded-lg bg-indigo-50 border border-indigo-200">
+            <span id="connectionStatus" class="font-bold text-gray-700">Connecting...</span>
+        </div>
+
+        <!-- 1. Lobby View -->
+        <div id="lobbyView" class="space-y-6 max-w-md mx-auto p-6 border border-gray-200 rounded-lg shadow-inner hidden">
+            <h2 class="text-2xl font-bold text-gray-800 text-center">Start or Join a Game</h2>
+            <div class="space-y-4">
+                <button id="createGameBtn" class="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition duration-200 shadow-lg">
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white inline" id="createSpinner" viewBox="0 0 24 24" style="display: none;">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Create New Game (I'll be Blue)
+                </button>
+            </div>
+
+            <div class="relative flex items-center py-2">
+                <div class="flex-grow border-t border-gray-300"></div>
+                <span class="flex-shrink mx-4 text-gray-500">OR</span>
+                <div class="flex-grow border-t border-gray-300"></div>
+            </div>
+
+            <form id="joinGameForm" class="space-y-4">
+                <input type="text" id="gameIdInput" placeholder="Enter 5-char Game ID (e.g., ABC12)" maxlength="5" class="w-full px-4 py-2 border border-gray-300 rounded-lg text-lg text-center uppercase tracking-widest focus:ring-red-500 focus:border-red-500" required>
+                <button type="submit" class="w-full py-3 px-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg transition duration-200 shadow-lg">
+                    Join Game (I'll be Red)
+                </button>
+            </form>
+        </div>
+
+        <!-- 2. Game In Progress View -->
+        <div id="gameView" class="space-y-4 hidden">
+            <!-- Game Info Bar -->
+            <div class="flex flex-col md:flex-row justify-between items-center p-3 rounded-lg bg-gray-100 border border-gray-300">
+                <span id="currentPlayerInfo" class="font-bold text-lg"></span>
+                <span id="gameIdDisplay" class="font-mono text-sm bg-gray-200 px-3 py-1 rounded-full mt-2 md:mt-0">ID: XXXX</span>
+            </div>
+
+            <!-- Canvas and Controls -->
+            <div class="flex flex-col lg:flex-row gap-6">
+                <!-- Canvas Container -->
+                <div class="lg:w-3/5 w-full aspect-square max-h-[600px] mx-auto" id="canvasContainer">
+                    <canvas id="gameCanvas" width="600" height="400" class="rounded-lg"></canvas>
+                </div>
+
+                <!-- Status and History -->
+                <div class="lg:w-2/5 w-full flex flex-col space-y-4">
+                    <!-- Status Message dynamically shows turn and velocity -->
+                    <div id="statusMessage" class="p-3 font-semibold text-center rounded-lg bg-indigo-100 text-indigo-800 border border-indigo-300 min-h-[50px]">
+                        Waiting for opponent...
+                    </div>
+                    <div id="crashMessage" class="text-center text-sm font-bold text-red-600 h-6"></div>
+                    
+                    <button id="resetButton" class="w-full py-3 px-4 bg-gray-500 hover:bg-gray-600 text-white font-bold rounded-lg transition duration-200 shadow-md">
+                        <span id="resetText">Reset Game</span>
+                    </button>
+
+                    <div class="p-4 bg-gray-100 rounded-lg text-sm space-y-1 border border-gray-200">
+                        <h3 class="font-bold text-gray-700 mb-2">Instructions</h3>
+                        <p>1. Click a **green dot** to select a safe move.</p>
+                        <p>2. Click a **red 'X'** to make an illegal move and reset your velocity.</p>
+                        <p>3. Use the **mouse wheel** to zoom in/out.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Custom Modal for Confirmation (replacing alert/confirm) -->
+    <div id="confirmationModal" class="hidden">
+        <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full">
+            <p id="modalMessage" class="mb-4 text-gray-700 text-lg font-medium"></p>
+            <div class="flex justify-end space-x-3">
+                <button id="modalCancel" class="px-4 py-2 text-gray-600 bg-gray-200 rounded-lg hover:bg-gray-300 transition">Cancel</button>
+                <button id="modalConfirm" class="px-4 py-2 text-white bg-red-600 rounded-lg hover:bg-red-700 transition">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        // --- Global Variables (Used for GitHub Injection) ---
+        // --- Firebase Configuration Injection Point ---
+        // The GitHub Action replaces this single line with: const firebaseConfig = {...};
+        const firebaseConfig = {"apiKey": "AIzaSyBbPPqXwBjuWSl6o8X78aFH5Z8UYSJRmCs","authDomain":"racetrack-game-9059c.firebaseapp.com","projectId": "racetrack-game-9059c","storageBucket":"racetrack-game-9059c.firebasestorage.app","messagingSenderId":"20754981579","appId":"1:20754981579:web:c2976d04b2f3c1890eb14e", "measurementId":"G-RR14KHE4CW"};
+        
+        // --- Firebase Setup ---
+        // Now you can safely use the 'firebaseConfig' variable.
+        let initialAuthToken = null; // No custom token on GitHub Pages
+        let appId = firebaseConfig.projectId; // Use projectId for unique pathing
+
+        // --- Firebase Setup ---       
+        let app, db, auth;
+        let userId = null;
+        let gameListener = null;
+
+        // --- Game State Variables ---
+        let gameState = null; // Holds the current state from Firestore
+        let myPlayerId = null; // 1 (Blue) or 2 (Red)
+        let gameHash = null;
+
+        // --- Game Constants (Preserved from v0.1) ---
+        const TRACK_CONFIG_STRING = `
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XX..........................2.............................XX
+XX..........................2.............................XX
+XX..........................2.............................XX
+XX..........................2.............................XX
+XX.......XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX........XX
+XX333333XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX1111111XX
+XX.......XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX........XX
+XX..........................S.............................XX
+XX..........................A.............................XX
+XX..........................B.............................XX
+XX..........................S.............................XX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+`;
+        const WAYPOINT_SEQUENCE = ['1', '2', '3'];
+        const MAX_VELOCITY_MANHATTAN_DISTANCE = 6;
+        const ACCELERATIONS = [
+            { ax: -1, ay: -1 }, { ax: 0, ay: -1 }, { ax: 1, ay: -1 },
+            { ax: -1, ay: 0 }, { ax: 0, ay: 0 }, { ax: 1, ay: 0 },
+            { ax: -1, ay: 1 }, { ax: 0, ay: 1 }, { ax: 1, ay: 1 }
+        ];
+
+        // --- Canvas and Track Variables ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const canvasContainer = document.getElementById('canvasContainer'); 
+        let CELL_SIZE = 12;
+        let GRID_WIDTH = 0;
+        let GRID_HEIGHT = 0;
+        let CANVAS_WIDTH = 0;
+        let CANVAS_HEIGHT = 0;
+        let track = { map: [], startPositions: { player1: null, player2: null } };
+        let allProjectedMoves = []; // Moves for the *current* human player
+
+        // --- Utility Functions ---
+
+        function showView(viewId) {
+            document.getElementById('lobbyView').classList.add('hidden');
+            document.getElementById('gameView').classList.add('hidden');
+            document.getElementById(viewId).classList.remove('hidden');
+        }
+
+        function generateGameHash() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let hash = '';
+            for (let i = 0; i < 5; i++) {
+                hash += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return hash;
+        }
+        
+        // Custom Confirmation Modal (replacing window.confirm)
+        function customConfirm(message) {
+            return new Promise(resolve => {
+                const modal = document.getElementById('confirmationModal');
+                const modalMessage = document.getElementById('modalMessage');
+                const modalConfirm = document.getElementById('modalConfirm');
+                const modalCancel = document.getElementById('modalCancel');
+
+                modalMessage.textContent = message;
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex'; // Ensure it's visible
+
+                const handleConfirm = () => {
+                    modal.style.display = 'none';
+                    resolve(true);
+                    cleanup();
+                };
+
+                const handleCancel = () => {
+                    modal.style.display = 'none';
+                    resolve(false);
+                    cleanup();
+                };
+
+                const cleanup = () => {
+                    modalConfirm.removeEventListener('click', handleConfirm);
+                    modalCancel.removeEventListener('click', handleCancel);
+                };
+
+                modalConfirm.addEventListener('click', handleConfirm);
+                modalCancel.addEventListener('click', handleCancel);
+            });
+        }
+
+        // --- Track & Game Logic (Adapted from v0.1) ---
+
+        function loadTrackConfig() {
+            // Parses the ASCII track string and initializes the track map and dimensions.
+            try {
+                const mapLines = TRACK_CONFIG_STRING.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
+                
+                track.map = [];
+                track.startPositions = { player1: null, player2: null };
+                GRID_HEIGHT = mapLines.length;
+                GRID_WIDTH = mapLines[0].length;
+                
+                CANVAS_WIDTH = GRID_WIDTH * CELL_SIZE;
+                CANVAS_HEIGHT = GRID_HEIGHT * CELL_SIZE;
+                canvas.width = CANVAS_WIDTH;
+                canvas.height = CANVAS_HEIGHT;
+                
+                // Adjust container size for scroll
+                canvasContainer.style.width = `${CANVAS_WIDTH}px`;
+                canvasContainer.style.height = `${CANVAS_HEIGHT}px`;
+
+
+                for (let y = 0; y < GRID_HEIGHT; y++) {
+                    let line = mapLines[y];
+                    if (line.length !== GRID_WIDTH) {
+                         line = line.padEnd(GRID_WIDTH, 'X').substring(0, GRID_WIDTH);
+                    }
+                    track.map.push(Array.from(line));
+                    
+                    for (let x = 0; x < GRID_WIDTH; x++) {
+                        // Use a fixed point for initial rendering/centering if A/B are off screen
+                        if (line[x] === 'A') {
+                            track.startPositions.player1 = { x: x + 0.5, y: y + 0.5 };
+                        } else if (line[x] === 'B') {
+                            track.startPositions.player2 = { x: x + 0.5, y: y + 0.5 };
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error("Error loading track configuration:", error);
+            }
+        }
+        
+        function getInitialVelocity() {
+            // This is the v0.1 initial velocity
+            return { dx: 1, dy: -1 };
+        }
+
+        function getTileType(x, y) {
+            if (!isFinite(x) || !isFinite(y)) return 'X';
+            const floorX = Math.floor(x);
+            const floorY = Math.floor(y);
+            
+            if (floorX < 0 || floorX >= GRID_WIDTH || floorY < 0 || floorY >= GRID_HEIGHT) {
+                return 'X'; 
+            }
+            return track.map[floorY][floorX];
+        }
+
+        function isPointOnTrack(x, y) {
+            const type = getTileType(x, y);
+            return type !== 'X';
+        }
+
+        function checkVectorCrossedTileType(p1, p2, targetTileType) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy), 1); 
+            
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps; 
+                const gridX = p1.x + t * dx;
+                const gridY = p1.y + t * dy;
+                
+                if (getTileType(gridX, gridY) === targetTileType) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function checkCollision(p1, p2) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy), 1); 
+
+            if (!isPointOnTrack(p1.x, p1.y)) return { x: Math.floor(p1.x), y: Math.floor(p1.y) }; 
+
+            for (let i = 1; i <= steps; i++) {
+                const t = i / steps;
+                const currentX = p1.x + t * dx;
+                const currentY = p1.y + t * dy;
+                
+                if (!isPointOnTrack(currentX, currentY)) {
+                    return { x: Math.floor(currentX), y: Math.floor(currentY) };
+                }
+            }
+            return null;
+        }
+        
+        function checkWinCondition(p2, playerState) {
+            if (playerState.nextWaypointIndex < WAYPOINT_SEQUENCE.length) {
+                return false; 
+            }
+            return checkVectorCrossedTileType(playerState.prevPos, p2, 'S');
+        }
+
+        function getProjectedMove(mockPlayerState, ax, ay) {
+            const projectedV = {
+                dx: mockPlayerState.v.dx + ax,
+                dy: mockPlayerState.v.dy + ay
+            };
+            
+            const manhattanD = Math.abs(projectedV.dx) + Math.abs(projectedV.dy);
+            const isSpeedSafe = manhattanD <= MAX_VELOCITY_MANHATTAN_DISTANCE;
+
+            if (!isSpeedSafe) {
+                return { 
+                    pos: mockPlayerState.pos, 
+                    crashPos: { 
+                        x: Math.floor(mockPlayerState.pos.x), 
+                        y: Math.floor(mockPlayerState.pos.y),
+                        reason: 'speed_violation' 
+                    }, 
+                    isSafe: false, 
+                    isWin: false,
+                    ax: ax,
+                    ay: ay,
+                    v: projectedV, 
+                    nextWaypointIndex: mockPlayerState.nextWaypointIndex
+                };
+            }
+
+            const projectedPos = {
+                x: mockPlayerState.pos.x + projectedV.dx,
+                y: mockPlayerState.pos.y + projectedV.dy
+            };
+            
+            const crashPos = checkCollision(mockPlayerState.pos, projectedPos);
+            const isTrackSafe = crashPos === null;
+
+            let nextWaypointIndex = mockPlayerState.nextWaypointIndex;
+            let isWin = false;
+
+            if (isTrackSafe) {
+                const nextCheckpointIndex = mockPlayerState.nextWaypointIndex;
+                if (nextCheckpointIndex < WAYPOINT_SEQUENCE.length) {
+                    const nextTileType = WAYPOINT_SEQUENCE[nextCheckpointIndex];
+                    if (checkVectorCrossedTileType(mockPlayerState.pos, projectedPos, nextTileType)) {
+                        nextWaypointIndex++;
+                    }
+                }
+                
+                const stateAfterWaypointCheck = { ...mockPlayerState, prevPos: mockPlayerState.pos, nextWaypointIndex: nextWaypointIndex };
+                isWin = checkWinCondition(projectedPos, stateAfterWaypointCheck);
+            }
+            
+            return { 
+                pos: projectedPos, 
+                crashPos: crashPos, 
+                isSafe: isTrackSafe,
+                isWin: isWin,
+                ax: ax,
+                ay: ay,
+                v: projectedV,
+                nextWaypointIndex: nextWaypointIndex
+            };
+        }
+
+        function calculatePossibleMoves() {
+            allProjectedMoves = [];
+            
+            if (!gameState || gameState.currentTurn !== myPlayerId) return;
+
+            const myState = gameState.players.find(p => p.id === myPlayerId);
+            if (!myState) return;
+
+            const mockPlayerState = {
+                pos: myState.pos,
+                v: myState.v,
+                nextWaypointIndex: myState.nextWaypointIndex,
+                prevPos: myState.prevPos
+            };
+
+            ACCELERATIONS.forEach(accel => {
+                allProjectedMoves.push(getProjectedMove(mockPlayerState, accel.ax, accel.ay));
+            });
+        }
+        
+        // --- Drawing Functions ---
+
+        function drawGrid() {
+            ctx.strokeStyle = '#cccccc'; // Light gray for grid lines
+            ctx.lineWidth = 0.5;
+
+            // Draw horizontal lines
+            for (let y = 0; y <= GRID_HEIGHT; y++) {
+                ctx.beginPath();
+                ctx.moveTo(0, y * CELL_SIZE);
+                ctx.lineTo(CANVAS_WIDTH, y * CELL_SIZE);
+                ctx.stroke();
+            }
+
+            // Draw vertical lines
+            for (let x = 0; x <= GRID_WIDTH; x++) {
+                ctx.beginPath();
+                ctx.moveTo(x * CELL_SIZE, 0);
+                ctx.lineTo(x * CELL_SIZE, CANVAS_HEIGHT);
+                ctx.stroke();
+            }
+        }
+
+        function drawTrack() {
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    const tile = track.map[y][x];
+                    ctx.fillStyle = '#ffffff'; // Default to white for '.' (track)
+                    
+                    if (tile === 'X') {
+                        ctx.fillStyle = '#1f2937'; // Dark gray for 'X' (wall)
+                    } else if (tile.match(/[1-3]/)) {
+                        ctx.fillStyle = '#fef3c7'; // Light yellow for Waypoints
+                    } else if (tile === 'S') {
+                        ctx.fillStyle = '#d1fae5'; // Light green for Finish/Start area
+                    } else if (tile === 'A' || tile === 'B') {
+                        ctx.fillStyle = '#99f6e4'; // Teal for initial start positions
+                    }
+                    
+                    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    
+                    // Draw checkpoint numbers
+                    if (tile.match(/[1-3]/)) {
+                        ctx.fillStyle = '#92400e'; 
+                        ctx.font = `${CELL_SIZE * 0.7}px Arial`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(tile, x * CELL_SIZE + CELL_SIZE / 2, y * CELL_SIZE + CELL_SIZE / 2);
+                    }
+                }
+            }
+        }
+
+        function drawPossibleMoves() {
+            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) return;
+            
+            allProjectedMoves.forEach(move => {
+                const centerX = move.pos.x * CELL_SIZE;
+                const centerY = move.pos.y * CELL_SIZE;
+
+                if (move.isSafe) {
+                    // Draw Green Dot for Safe Moves
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, CELL_SIZE / 4, 0, Math.PI * 2);
+                    ctx.fillStyle = move.isWin ? '#10b981' : '#10b981'; // Green (darker for win)
+                    ctx.fill();
+                    
+                    // Draw velocity line (P->P')
+                    const playerState = gameState.players.find(p => p.id === myPlayerId);
+                    ctx.strokeStyle = '#10b981';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(playerState.pos.x * CELL_SIZE, playerState.pos.y * CELL_SIZE);
+                    ctx.lineTo(centerX, centerY);
+                    ctx.stroke();
+
+                } else {
+                    // Draw Red 'X' for Crash/Illegal Moves
+                    const crashX = (move.crashPos.x + 0.5) * CELL_SIZE;
+                    const crashY = (move.crashPos.y + 0.5) * CELL_SIZE;
+                    const size = CELL_SIZE / 3;
+
+                    ctx.strokeStyle = '#ef4444'; // Red
+                    ctx.lineWidth = 2;
+
+                    ctx.beginPath();
+                    ctx.moveTo(crashX - size, crashY - size);
+                    ctx.lineTo(crashX + size, crashY + size);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(crashX + size, crashY - size);
+                    ctx.lineTo(crashX - size, crashY + size);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function drawCars() {
+            if (!gameState) return;
+
+            gameState.players.forEach(player => {
+                const color = player.id === 1 ? '#3b82f6' : '#ef4444'; // Blue or Red
+                const radius = CELL_SIZE / 3;
+                const centerX = player.pos.x * CELL_SIZE;
+                const centerY = player.pos.y * CELL_SIZE;
+
+                // Draw Car Body
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+                
+                // Draw outline for definition
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // Draw velocity vector (P->V)
+                if (player.v.dx !== 0 || player.v.dy !== 0) {
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + player.v.dx * CELL_SIZE, centerY + player.v.dy * CELL_SIZE);
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function render() {
+            // 1. Clear and Draw Track
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            drawTrack();
+            drawGrid();
+
+            // 2. Draw Moves (if it's my turn)
+            calculatePossibleMoves(); // Always calculate before rendering
+            drawPossibleMoves();
+
+            // 3. Draw Cars (last, so they are on top)
+            drawCars();
+        }
+
+        function centerViewOnPlayer() {
+            if (!gameState) return;
+            const myState = gameState.players.find(p => p.id === myPlayerId);
+            if (!myState) return;
+
+            // Target scroll position in pixels
+            const targetX = (myState.pos.x * CELL_SIZE) - (canvasContainer.clientWidth / 2);
+            const targetY = (myState.pos.y * CELL_SIZE) - (canvasContainer.clientHeight / 2);
+
+            // Smooth scroll to the target position
+            canvasContainer.scrollTo({
+                left: targetX,
+                top: targetY,
+                behavior: 'smooth'
+            });
+        }
+
+        // --- UI Update & Game Status ---
+
+        function updateUI() {
+            if (!gameState) return;
+
+            document.getElementById('gameIdDisplay').textContent = `ID: ${gameState.gameHash}`;
+            const playerColor = myPlayerId === 1 ? 'Blue' : 'Red';
+            document.getElementById('currentPlayerInfo').innerHTML = `You are <span class="text-${myPlayerId === 1 ? 'blue' : 'red'}-600 font-extrabold">Player ${myPlayerId} (${playerColor})</span>`;
+
+            const currentTurnPlayer = gameState.players.find(p => p.id === gameState.currentTurn);
+            const myTurn = gameState.currentTurn === myPlayerId;
+            const statusEl = document.getElementById('statusMessage');
+            const crashEl = document.getElementById('crashMessage');
+
+            // Explicitly check for P1_won or P2_won
+            if (gameState.status === 'P1_won' || gameState.status === 'P2_won') {
+                const winnerId = gameState.status === 'P1_won' ? 1 : 2;
+                const winnerColor = winnerId === 1 ? 'Blue' : 'Red';
+                statusEl.className = "p-4 font-bold text-center rounded-xl bg-green-100 text-green-800 border-4 border-green-500 text-2xl animate-pulse";
+                statusEl.textContent = `Game Over! Player ${winnerId} (${winnerColor}) wins!`;
+                crashEl.textContent = '';
+                document.getElementById('resetText').textContent = myPlayerId === 1 && gameState.player2Id ? 'Delete Game' : 'Forfeit & Start New Game';
+                return;
+            }
+
+            // Handle Waiting for Opponent (Status is 'lobby')
+            if (!gameState.player2Id) {
+                statusEl.className = "p-3 font-semibold text-center rounded-lg bg-yellow-100 text-yellow-800 border border-yellow-300";
+                statusEl.textContent = "Waiting for an opponent to join...";
+                crashEl.textContent = 'Share the Game ID with a friend!';
+                document.getElementById('resetText').textContent = 'Delete Game';
+                return;
+            }
+            document.getElementById('resetText').textContent = 'Forfeit & Start New Game';
+
+
+            // Handle Turn (Status must be 'playing' at this point)
+            const playerTurnV = `(V: ${currentTurnPlayer.v.dx}, ${currentTurnPlayer.v.dy})`;
+            let nextGoal = '';
+            if (currentTurnPlayer.nextWaypointIndex < WAYPOINT_SEQUENCE.length) {
+                nextGoal = `Next Goal: Waypoint ${WAYPOINT_SEQUENCE[currentTurnPlayer.nextWaypointIndex]}`;
+            } else {
+                nextGoal = `Next Goal: Finish Line ('S')`;
+            }
+
+            if (!currentTurnPlayer.safe) {
+                 crashEl.textContent = 'Velocity reset to (0, 0) due to crash or speed violation.';
+            } else {
+                 crashEl.textContent = '';
+            }
+
+            if (myTurn) {
+                statusEl.className = `p-3 font-semibold text-center rounded-lg bg-${myPlayerId === 1 ? 'blue' : 'red'}-100 text-${myPlayerId === 1 ? 'blue' : 'red'}-800 border border-${myPlayerId === 1 ? 'blue' : 'red'}-300`;
+                statusEl.textContent = `YOUR TURN! ${playerTurnV} | ${nextGoal}`;
+            } else {
+                statusEl.className = "p-3 font-semibold text-center rounded-lg bg-gray-100 text-gray-700 border border-gray-300";
+                statusEl.textContent = `Opponent's Turn... ${playerTurnV} | ${nextGoal}`;
+            }
+
+            // Draw and center view
+            render();
+            centerViewOnPlayer();
+        }
+
+        // --- Game Actions ---
+
+        async function applyMove(move) {
+            if (!gameState || gameState.currentTurn !== myPlayerId) return;
+
+            const playerIndex = gameState.players.findIndex(p => p.id === myPlayerId);
+            if (playerIndex === -1) return;
+
+            const nextPlayerId = myPlayerId === 1 ? 2 : 1;
+            const newStatus = move.isWin ? (myPlayerId === 1 ? 'P1_won' : 'P2_won') : 'playing';
+
+            const newPlayerState = { ...gameState.players[playerIndex] };
+
+            if (move.isSafe) {
+                // Safe move: update position, velocity, and waypoint
+                newPlayerState.prevPos = newPlayerState.pos;
+                newPlayerState.pos = move.pos;
+                newPlayerState.v = move.v;
+                newPlayerState.nextWaypointIndex = move.nextWaypointIndex;
+                newPlayerState.safe = true;
+            } else {
+                // Illegal move (crash/speed): reset position and velocity
+                newPlayerState.prevPos = newPlayerState.pos; 
+                newPlayerState.v = { dx: 0, dy: 0 };
+                newPlayerState.safe = false; 
+            }
+            
+            // Create the update object
+            const updates = {
+                currentTurn: newStatus === 'playing' ? nextPlayerId : myPlayerId, // If game over, currentTurn is the winner
+                status: newStatus,
+                players: [...gameState.players]
+            };
+            updates.players[playerIndex] = newPlayerState;
+
+            try {
+                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
+                await firebase.setDoc(gameRef, updates, { merge: true });
+            } catch (error) {
+                console.error("Error applying move:", error);
+                document.getElementById('statusMessage').textContent = 'Error saving move. Check console.';
+            }
+        }
+        
+        function handleCanvasClick(event) {
+            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) {
+                // Not the player's turn, not in 'playing' state, or waiting for P2
+                return;
+            }
+
+            // Using event.offsetX and event.offsetY ensures coordinates are relative
+            // to the canvas element, regardless of scrolling/offset from the viewport.
+            const xGrid = event.offsetX / CELL_SIZE;
+            const yGrid = event.offsetY / CELL_SIZE;
+
+            // Click tolerance in grid units (e.g., within 1/4 of a cell radius)
+            const clickTolerance = 0.25;
+
+            for (const move of allProjectedMoves) {
+                let targetPos;
+
+                if (move.isSafe) {
+                    // Target for safe moves (green dot) is the projected position (x.5, y.5)
+                    targetPos = move.pos;
+                } else {
+                    // Target for illegal moves (red X) is the center of the crash cell
+                    // crashPos holds the integer (x, y) of the crash cell. Add 0.5 for center.
+                    targetPos = { x: move.crashPos.x + 0.5, y: move.crashPos.y + 0.5 };
+                }
+
+                // Check distance using Pythagorean theorem (Euclidean distance)
+                const distance = Math.sqrt(
+                    Math.pow(xGrid - targetPos.x, 2) + Math.pow(yGrid - targetPos.y, 2)
+                );
+
+                if (distance < clickTolerance) {
+                    applyMove(move);
+                    return; 
+                }
+            }
+        }
+
+        // --- Firebase Handlers ---
+
+        function setupGameListener(hash) {
+            if (gameListener) gameListener(); // Unsubscribe from previous game
+            gameHash = hash;
+
+            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
+
+            gameListener = firebase.onSnapshot(gameRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    gameState = docSnap.data();
+                    gameState.gameHash = hash; // Ensure hash is available on the state object
+                    
+                    // Determine my Player ID (P1 or P2)
+                    if (gameState.player1Id === userId) {
+                        myPlayerId = 1;
+                    } else if (gameState.player2Id === userId) {
+                        myPlayerId = 2;
+                    } else {
+                        // This should not happen if the user is linked to the game
+                        console.error("User not registered as P1 or P2 in this game.");
+                        return;
+                    }
+
+                    showView('gameView');
+                    updateUI();
+
+                } else {
+                    // Game document was deleted (e.g., by P1 reset)
+                    console.log("Game deleted or not found.");
+                    gameState = null;
+                    gameHash = null;
+                    myPlayerId = null;
+                    showView('lobbyView');
+                }
+            }, (error) => {
+                console.error("Firestore error:", error);
+            });
+        }
+        
+        async function createGame() {
+            document.getElementById('createSpinner').style.display = 'inline';
+            
+            const newHash = generateGameHash();
+            const p1Start = track.startPositions.player1;
+            const p2Start = track.startPositions.player2;
+            
+            // Reverting to V0.1 movement: Starting with non-zero initial velocity
+            const initialV = getInitialVelocity(); // { dx: 1, dy: -1 }
+
+            const newGameState = {
+                gameHash: newHash,
+                status: 'lobby', // waiting for player 2
+                currentTurn: 1,
+                player1Id: userId,
+                player2Id: null,
+                players: [
+                    // Player 1 (Blue) starts with the initial velocity
+                    { id: 1, pos: p1Start, prevPos: p1Start, v: initialV, nextWaypointIndex: 0, safe: true },
+                    // Player 2 (Red) also starts with the same initial velocity
+                    { id: 2, pos: p2Start, prevPos: p2Start, v: initialV, nextWaypointIndex: 0, safe: true }
+                ]
+            };
+
+            try {
+                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${newHash}`);
+                await firebase.setDoc(gameRef, newGameState);
+                setupGameListener(newHash);
+            } catch (error) {
+                console.error("Error creating game:", error);
+            } finally {
+                document.getElementById('createSpinner').style.display = 'none';
+            }
+        }
+
+        async function joinGame(hash) {
+            const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${hash}`);
+            try {
+                const docSnap = await firebase.getDoc(gameRef);
+
+                if (docSnap.exists()) {
+                    const existingGame = docSnap.data();
+
+                    if (existingGame.player2Id === null) {
+                        // Update game to include P2
+                        await firebase.updateDoc(gameRef, {
+                            player2Id: userId,
+                            status: 'playing' // Game starts now
+                        });
+                        setupGameListener(hash);
+                    } else if (existingGame.player1Id === userId || existingGame.player2Id === userId) {
+                        // Rejoining existing game
+                        setupGameListener(hash);
+                    } else {
+                        // Game is full
+                        await customConfirm(`Game ${hash} is already full. Please find another game or create your own.`);
+                    }
+                } else {
+                    await customConfirm(`Game ID ${hash} not found.`);
+                }
+
+            } catch (error) {
+                console.error("Error joining game:", error);
+                await customConfirm("An error occurred while joining the game.");
+            }
+        }
+
+        async function resetGame() {
+            if (!gameState || !gameHash) return;
+
+            const confirmMessage = myPlayerId === 1 && gameState.player2Id
+                ? `Are you sure you want to delete game ${gameHash}? This will end the game for both players.`
+                : `Are you sure you want to forfeit this game and start a new one?`;
+
+            const confirmed = await customConfirm(confirmMessage);
+            if (!confirmed) return;
+
+            try {
+                const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
+                
+                if (myPlayerId === 1 && gameState.player2Id) {
+                    // P1 deletes the game
+                    await firebase.deleteDoc(gameRef);
+                } else {
+                    // P2 forfeits / P1 forfeits an empty game (just navigate away)
+                    gameState = null;
+                    gameHash = null;
+                    myPlayerId = null;
+                    if (gameListener) gameListener();
+                    showView('lobbyView');
+                }
+            } catch (error) {
+                console.error("Error resetting game:", error);
+            }
+        }
+        
+        // --- Initialization and Event Listeners ---
+
+        function initFirebase() {
+            if (!firebaseConfig.projectId) {
+                document.getElementById('connectionStatus').textContent = 'ERROR: Firebase config missing.';
+                return;
+            }
+            
+            // For debugging: Set Firestore log level
+            firebase.setLogLevel('debug');
+
+            app = firebase.initializeApp(firebaseConfig);
+            db = firebase.getFirestore(app);
+            auth = firebase.getAuth(app);
+
+            // CRITICAL STEP: Load track configuration and dimensions early
+            loadTrackConfig(); 
+            render(); 
+
+            firebase.onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                } else {
+                    try {
+                        // Use custom token if available (in Canvas environment), otherwise sign in anonymously
+                        if (initialAuthToken) {
+                            const anonUserCredential = await firebase.signInWithCustomToken(auth, initialAuthToken);
+                            userId = anonUserCredential.user.uid;
+                        } else {
+                            const anonUserCredential = await firebase.signInAnonymously(auth);
+                            userId = anonUserCredential.user.uid;
+                        }
+                    } catch (error) {
+                        console.error("Authentication failed:", error);
+                        document.getElementById('connectionStatus').textContent = 'Authentication Failed. Check Auth settings.';
+                        return;
+                    }
+                }
+                document.getElementById('connectionStatus').textContent = 'Ready to play.';
+                showView('lobbyView');
+            });
+        }
+
+        window.onload = function() {
+            // Attach event listeners
+            document.getElementById('createGameBtn').addEventListener('click', createGame);
+            document.getElementById('joinGameForm').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const hash = document.getElementById('gameIdInput').value.toUpperCase().trim();
+                if (hash.length === 5) {
+                    joinGame(hash);
+                }
+            });
+            document.getElementById('resetButton').addEventListener('click', resetGame);
+            canvas.addEventListener('click', handleCanvasClick);
+            
+            // Zoom functionality using mouse wheel
+            canvasContainer.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const newCellSize = CELL_SIZE + (e.deltaY < 0 ? 1 : -1);
+                CELL_SIZE = Math.min(Math.max(10, newCellSize), 30); // Limit zoom range
+                loadTrackConfig(); // Re-calculate canvas dimensions
+                render();
+                centerViewOnPlayer();
+            });
+
+            initFirebase();
+        }
+    </script>
+</body>
+</html>
