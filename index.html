@@ -169,7 +169,18 @@
         // const appId = "YOUR_FIREBASE_PROJECT_ID";
         // const firebaseConfig = { apiKey: "...", authDomain: "...", projectId: "...", ... };
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        // Your web app's Firebase configuration
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+          apiKey: "AIzaSyBbPPqXwBjuWSl6o8X78aFH5Z8UYSJRmCs",
+          authDomain: "racetrack-game-9059c.firebaseapp.com",
+          projectId: "racetrack-game-9059c",
+          storageBucket: "racetrack-game-9059c.firebasestorage.app",
+          messagingSenderId: "20754981579",
+          appId: "1:20754981579:web:c2976d04b2f3c1890eb14e",
+          measurementId: "G-RR14KHE4CW"
+        };
+        
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // --- Firebase Setup ---
