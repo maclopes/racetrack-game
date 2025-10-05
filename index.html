@@ -741,43 +741,44 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             }
         }
         
-        function handleCanvasClick(event) {
-            if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) {
-                // Not the player's turn, not in 'playing' state, or waiting for P2
-                return;
-            }
+function handleCanvasClick(event) {
+    if (!gameState || gameState.currentTurn !== myPlayerId || gameState.status !== 'playing' || !gameState.player2Id) {
+        // Not the player's turn, not in 'playing' state, or waiting for P2
+        return;
+    }
 
-            const rect = canvas.getBoundingClientRect();
-            // Calculate coordinates relative to the track's grid (1.0 = one cell)
-            const xGrid = (event.clientX - rect.left) / CELL_SIZE;
-            const yGrid = (event.clientY - rect.top) / CELL_SIZE;
+    // FIX: Use event.offsetX and event.offsetY.
+    // These properties give coordinates relative to the top-left corner of the canvas element itself,
+    // which correctly handles scrolling in the parent container.
+    const xGrid = event.offsetX / CELL_SIZE;
+    const yGrid = event.offsetY / CELL_SIZE;
 
-            // Click tolerance in grid units (e.g., within 1/4 of a cell radius)
-            const clickTolerance = 0.25;
+    // Click tolerance in grid units (e.g., within 1/4 of a cell radius)
+    const clickTolerance = 0.25;
 
-            for (const move of allProjectedMoves) {
-                let targetPos;
+    for (const move of allProjectedMoves) {
+        let targetPos;
 
-                if (move.isSafe) {
-                    // Target for safe moves (green dot) is the projected position (x.5, y.5)
-                    targetPos = move.pos;
-                } else {
-                    // Target for illegal moves (red X) is the center of the crash cell
-                    // crashPos holds the integer (x, y) of the crash cell. Add 0.5 for center.
-                    targetPos = { x: move.crashPos.x + 0.5, y: move.crashPos.y + 0.5 };
-                }
-
-                // Check distance using Pythagorean theorem (Euclidean distance)
-                const distance = Math.sqrt(
-                    Math.pow(xGrid - targetPos.x, 2) + Math.pow(yGrid - targetPos.y, 2)
-                );
-
-                if (distance < clickTolerance) {
-                    applyMove(move);
-                    return; 
-                }
-            }
+        if (move.isSafe) {
+            // Target for safe moves (green dot) is the projected position (x.5, y.5)
+            targetPos = move.pos;
+        } else {
+            // Target for illegal moves (red X) is the center of the crash cell
+            // crashPos holds the integer (x, y) of the crash cell. Add 0.5 for center.
+            targetPos = { x: move.crashPos.x + 0.5, y: move.crashPos.y + 0.5 };
         }
+
+        // Check distance using Pythagorean theorem (Euclidean distance)
+        const distance = Math.sqrt(
+            Math.pow(xGrid - targetPos.x, 2) + Math.pow(yGrid - targetPos.y, 2)
+        );
+
+        if (distance < clickTolerance) {
+            applyMove(move);
+            return; 
+        }
+    }
+}
 
         // --- Firebase Handlers ---
 
