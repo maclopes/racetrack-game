@@ -1,0 +1,57 @@
+# Deploy site to GitHub Pages and generate runtime config.json from repository secrets.
+# Place your Firebase values in repository Secrets with the names below.
+# Secrets required (create in repo Settings -> Secrets -> Actions):
+# - FIREBASE_API_KEY
+# - FIREBASE_AUTH_DOMAIN
+# - FIREBASE_PROJECT_ID
+# - FIREBASE_STORAGE_BUCKET
+# - FIREBASE_MESSAGING_SENDER_ID
+# - FIREBASE_APP_ID
+# - FIREBASE_MEASUREMENT_ID (optional)
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create runtime config.json from secrets
+        shell: bash
+        run: |
+          echo "Creating runtime config.json from secrets"
+          # Write a safe JSON using here-doc. Secrets will be expanded by the runner.
+          cat > ./config.json <<EOF
+{
+  "apiKey": "${{ secrets.FIREBASE_API_KEY }}",
+  "authDomain": "${{ secrets.FIREBASE_AUTH_DOMAIN }}",
+  "projectId": "${{ secrets.FIREBASE_PROJECT_ID }}",
+  "storageBucket": "${{ secrets.FIREBASE_STORAGE_BUCKET }}",
+  "messagingSenderId": "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}",
+  "appId": "${{ secrets.FIREBASE_APP_ID }}",
+  "measurementId": "${{ secrets.FIREBASE_MEASUREMENT_ID }}"
+}
+EOF
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v3
+
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v1
+        with:
+          # Upload the repository root (adjust if your built site is in another folder)
+          path: ./
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v1
