@@ -41,15 +41,18 @@ jobs:
           FIREBASE_MEASUREMENT_ID: ${{ secrets.FIREBASE_MEASUREMENT_ID }}
         run: |
           mkdir -p _site
-          # Use sed to replace placeholders in index.html and output to the _site directory
-          sed -e "s|__FIREBASE_API_KEY__|${FIREBASE_API_KEY}|g" \
-              -e "s|__FIREBASE_AUTH_DOMAIN__|${FIREBASE_AUTH_DOMAIN}|g" \
-              -e "s|__FIREBASE_PROJECT_ID__|${FIREBASE_PROJECT_ID}|g" \
-              -e "s|__FIREBASE_STORAGE_BUCKET__|${FIREBASE_STORAGE_BUCKET}|g" \
-              -e "s|__FIREBASE_MESSAGING_SENDER_ID__|${FIREBASE_MESSAGING_SENDER_ID}|g" \
-              -e "s|__FIREBASE_APP_ID__|${FIREBASE_APP_ID}|g" \
-              -e "s|__FIREBASE_MEASUREMENT_ID__|${FIREBASE_MEASUREMENT_ID}|g" \
+          # Use sed to replace placeholders. The pattern "?__...__"? makes the quotes optional to handle JSON correctly.
+          sed -e "s|\"?__FIREBASE_API_KEY__\"?|${FIREBASE_API_KEY}|g" \
+              -e "s|\"?__FIREBASE_AUTH_DOMAIN__\"?|${FIREBASE_AUTH_DOMAIN}|g" \
+              -e "s|\"?__FIREBASE_PROJECT_ID__\"?|${FIREBASE_PROJECT_ID}|g" \
+              -e "s|\"?__FIREBASE_STORAGE_BUCKET__\"?|${FIREBASE_STORAGE_BUCKET}|g" \
+              -e "s|\"?__FIREBASE_MESSAGING_SENDER_ID__\"?|${FIREBASE_MESSAGING_SENDER_ID}|g" \
+              -e "s|\"?__FIREBASE_APP_ID__\"?|${FIREBASE_APP_ID}|g" \
+              -e "s|\"?__FIREBASE_MEASUREMENT_ID__\"?|${FIREBASE_MEASUREMENT_ID}|g" \
               index.html > _site/index.html
+          
+          # Create a placeholder favicon to prevent 404 errors in the browser console
+          echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><circle cx="1" cy="1" r="1" fill="#3b82f6"/></svg>' > _site/favicon.ico
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
