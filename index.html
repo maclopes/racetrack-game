@@ -223,11 +223,12 @@
             // Build a list of candidate locations to try. GitHub Pages often serves from a repo subpath
             // so we attempt several sensible URLs derived from the current location.
             const candidates = [];
+            const configFilename = 'firebase-config.json';
             // Common/relative forms
-            candidates.push('./config.json');
-            candidates.push('config.json');
+            candidates.push(`./${configFilename}`);
+            candidates.push(configFilename);
             // Absolute site root
-            candidates.push('/config.json');
+            candidates.push(`/${configFilename}`);
 
             // Try using the current document base path. Example: https://user.github.io/repo-name/
             try {
@@ -235,16 +236,16 @@
                 // directory where index.html lives
                 const pathnameDir = loc.pathname.replace(/\/[^/]*$/, '/');
                 if (pathnameDir && pathnameDir !== '/') {
-                    candidates.push(pathnameDir + 'config.json');
+                    candidates.push(pathnameDir + configFilename);
                     // also try with origin
-                    candidates.push(loc.origin + pathnameDir + 'config.json');
+                    candidates.push(loc.origin + pathnameDir + configFilename);
                 }
 
                 // Try first path segment as common repo name (e.g. /repo-name/config.json)
                 const segments = loc.pathname.split('/').filter(Boolean);
                 if (segments.length > 0) {
-                    candidates.push('/' + segments[0] + '/config.json');
-                    candidates.push(loc.origin + '/' + segments[0] + '/config.json');
+                    candidates.push('/' + segments[0] + `/${configFilename}`);
+                    candidates.push(loc.origin + '/' + segments[0] + `/${configFilename}`);
                 }
             } catch (e) {
                 // ignore

@@ -51,10 +51,8 @@ jobs:
           # This is more robust than rsync as it avoids any .gitignore issues.
           mkdir -p _site
           cp index.html _site/
-          mv config.json _site/
-          # Create a .artifactignore file to ensure upload-pages-artifact includes config.json,
-          # overriding the top-level .gitignore. An empty file would also work.
-          touch _site/.artifactignore
+          # Rename config.json to a name not in .gitignore to ensure it's uploaded.
+          mv config.json _site/firebase-config.json
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
