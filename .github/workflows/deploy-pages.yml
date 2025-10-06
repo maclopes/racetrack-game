@@ -47,9 +47,10 @@ jobs:
 
       - name: Prepare deployment artifact
         run: |
-          mkdir -p _site
+          # Use rsync to copy all files (respecting .gitignore) to the _site directory
+          rsync -av --exclude '.git' --exclude '.github' ./ _site/
+          # Now, explicitly move the generated config.json into the _site directory
           mv config.json _site/
-          cp index.html _site/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
