@@ -1,0 +1,2 @@
+# Ignore runtime firebase config with real API keys
+config.json

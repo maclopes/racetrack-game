@@ -1,0 +1,9 @@
+{
+  "apiKey": "REPLACE_ME",
+  "authDomain": "your-project.firebaseapp.com",
+  "projectId": "your-project-id",
+  "storageBucket": "your-project.appspot.com",
+  "messagingSenderId": "SENDER_ID",
+  "appId": "APP_ID",
+  "measurementId": "G-MEASUREID"
+}

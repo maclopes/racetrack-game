@@ -101,6 +101,16 @@
                     Create New Game (I'll be Blue)
                 </button>
             </div>
+                <div class="space-y-4">
+                    <button id="localGameBtn" class="w-full py-3 px-4 bg-gray-700 hover:bg-gray-800 text-white font-bold rounded-lg transition duration-200 shadow-lg">
+                        Local 2-Player (Same Browser)
+                    </button>
+
+                    <button id="playAIBtn" class="w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg transition duration-200 shadow-lg">
+                        Play vs AI (AI is Red)
+                    </button>
+                </div>
+
 
             <div class="relative flex items-center py-2">
                 <div class="flex-grow border-t border-gray-300"></div>
@@ -138,6 +148,7 @@
                         Waiting for opponent...
                     </div>
                     <div id="crashMessage" class="text-center text-sm font-bold text-red-600 h-6"></div>
+                    <div id="skipInfo" class="text-center text-sm font-semibold text-yellow-700 h-6"></div>
                     
                     <button id="resetButton" class="w-full py-3 px-4 bg-gray-500 hover:bg-gray-600 text-white font-bold rounded-lg transition duration-200 shadow-md">
                         <span id="resetText">Reset Game</span>
@@ -148,6 +159,18 @@
                         <p>1. Click a **green dot** to select a safe move.</p>
                         <p>2. Click a **red 'X'** to make an illegal move and reset your velocity.</p>
                         <p>3. Use the **mouse wheel** to zoom in/out.</p>
+                    </div>
+                    <!-- Path Visibility Controls -->
+                    <div class="p-4 bg-white rounded-lg text-sm border border-gray-200">
+                        <h3 class="font-bold text-gray-700 mb-2">Path Display</h3>
+                        <label class="flex items-center space-x-3">
+                            <input type="checkbox" id="showAIPathCheckbox" />
+                            <span class="text-sm text-gray-700">Show AI optimal path (when AI is present)</span>
+                        </label>
+                        <label class="flex items-center space-x-3 mt-2">
+                            <input type="checkbox" id="showPlayerPathCheckbox" />
+                            <span class="text-sm text-gray-700">Show my optimal path</span>
+                        </label>
                     </div>
                 </div>
             </div>
@@ -168,15 +191,22 @@
     <script type="text/javascript">
         // --- Global Variables (Provided by Canvas Environment) ---
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = {
-          apiKey: "AIzaSyBbPPqXwBjuWSl6o8X78aFH5Z8UYSJRmCs",
-          authDomain: "racetrack-game-9059c.firebaseapp.com",
-          projectId: "racetrack-game-9059c",
-          storageBucket: "racetrack-game-9059c.firebasestorage.app",
-          messagingSenderId: "20754981579",
-          appId: "1:20754981579:web:c2976d04b2f3c1890eb14e",
-          measurementId: "G-RR14KHE4CW"
-        };
+        // Firebase config is loaded at runtime to avoid committing API keys to the repo.
+        // Provide either a /config.json file (gitignored) or inject window.__FIREBASE_CONFIG__ in your host.
+        let firebaseConfig = null;
+
+        async function loadFirebaseConfig() {
+            if (window.__FIREBASE_CONFIG__) return window.__FIREBASE_CONFIG__;
+            try {
+                const res = await fetch('/config.json', { cache: 'no-store' });
+                if (!res.ok) throw new Error('no-config');
+                const cfg = await res.json();
+                return cfg;
+            } catch (e) {
+                console.error('Firebase config not found. Provide /config.json (gitignored) or set window.__FIREBASE_CONFIG__. See config.example.json.');
+                return null;
+            }
+        }
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // --- Firebase Setup ---
@@ -184,10 +214,12 @@
         let userId = null;
         let gameListener = null;
 
-        // --- Game State Variables ---
-        let gameState = null; // Holds the current state from Firestore
-        let myPlayerId = null; // 1 (Blue) or 2 (Red)
-        let gameHash = null;
+    // --- Game State Variables ---
+    let gameState = null; // Holds the current state from Firestore or local
+    let myPlayerId = null; // 1 (Blue) or 2 (Red)
+    let gameHash = null;
+    let localGameMode = null; // null | 'local' | 'ai' | 'online'
+    let aiThinkingTimeout = null;
 
         // --- Game Constants (Preserved from v0.1) ---
         const TRACK_CONFIG_STRING = `
@@ -226,6 +258,14 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         let CANVAS_HEIGHT = 0;
         let track = { map: [], startPositions: { player1: null, player2: null } };
         let allProjectedMoves = []; // Moves for the *current* human player
+    let aiPlannedPath = null; // Cached full path for AI (array of positions/moves)
+    let playerPlannedPath = null; // Cached full path for the human player (when requested)
+    let lastAISearchSignature = null; // Used to avoid spamming AI search logs
+    // Checkbox preferences (persisted)
+    const PREF_SHOW_AI_PATH = 'pref_show_ai_path_v1';
+    const PREF_SHOW_PLAYER_PATH = 'pref_show_player_path_v1';
+    let showAIPath = localStorage.getItem(PREF_SHOW_AI_PATH) === 'true';
+    let showPlayerPath = localStorage.getItem(PREF_SHOW_PLAYER_PATH) === 'true';
 
         // --- Utility Functions ---
 
@@ -377,15 +417,45 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             }
             return null;
         }
+
+        // Return true if segment p1->p2 intersects segment q1->q2 (excluding touching at endpoints as crossing)
+        function segmentsIntersect(p1, p2, q1, q2) {
+            function orient(a, b, c) {
+                return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+            }
+            const o1 = orient(p1, p2, q1);
+            const o2 = orient(p1, p2, q2);
+            const o3 = orient(q1, q2, p1);
+            const o4 = orient(q1, q2, p2);
+
+            return (o1 * o2 < 0) && (o3 * o4 < 0);
+        }
         
         function checkWinCondition(p2, playerState) {
             if (playerState.nextWaypointIndex < WAYPOINT_SEQUENCE.length) {
                 return false; 
             }
-            return checkVectorCrossedTileType(playerState.prevPos, p2, 'S');
+            // Finish if the vector crosses any of the start/finish markers: 'S', 'A', or 'B'
+            return checkVectorCrossedTileType(playerState.prevPos, p2, 'S')
+                || checkVectorCrossedTileType(playerState.prevPos, p2, 'A')
+                || checkVectorCrossedTileType(playerState.prevPos, p2, 'B');
         }
 
-        function getProjectedMove(mockPlayerState, ax, ay) {
+        // Debug helper: print both players' state to console for tracing
+        function printPlayersState(context) {
+            try {
+                // Concise state: one line per player
+                console.log(`STATE [${context}] game=${gameHash} mode=${localGameMode}`);
+                if (!gameState) { console.log('STATE gameState = null'); return; }
+                gameState.players.forEach(p => {
+                    console.log(`  P${p.id} pos=(${p.pos.x.toFixed(2)},${p.pos.y.toFixed(2)}) v=(${p.v.dx},${p.v.dy}) wp=${p.nextWaypointIndex} safe=${p.safe}`);
+                });
+            } catch (e) {
+                console.error('STATE printPlayersState error', e);
+            }
+        }
+
+    function getProjectedMove(mockPlayerState, ax, ay, actorId = null) {
             const projectedV = {
                 dx: mockPlayerState.v.dx + ax,
                 dy: mockPlayerState.v.dy + ay
@@ -416,8 +486,27 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 y: mockPlayerState.pos.y + projectedV.dy
             };
             
-            const crashPos = checkCollision(mockPlayerState.pos, projectedPos);
-            const isTrackSafe = crashPos === null;
+            let crashPos = checkCollision(mockPlayerState.pos, projectedPos);
+            let isTrackSafe = crashPos === null;
+
+            // Player collisions: cannot end on top of the other player or cross their last movement vector
+            try {
+                if (gameState && actorId !== null) {
+                    const opponent = gameState.players.find(p => p.id !== actorId);
+                    if (opponent) {
+                        // Ending on opponent
+                        if (Math.abs(projectedPos.x - opponent.pos.x) < 0.001 && Math.abs(projectedPos.y - opponent.pos.y) < 0.001) {
+                            crashPos = { x: Math.floor(opponent.pos.x), y: Math.floor(opponent.pos.y), reason: 'player_collision' };
+                            isTrackSafe = false;
+                        }
+                        // Crossing opponent last vector
+                        if (opponent.prevPos && (segmentsIntersect(mockPlayerState.pos, projectedPos, opponent.prevPos, opponent.pos))) {
+                            crashPos = { x: Math.floor(mockPlayerState.pos.x), y: Math.floor(mockPlayerState.pos.y), reason: 'cross_opponent' };
+                            isTrackSafe = false;
+                        }
+                    }
+                }
+            } catch (e) {}
 
             let nextWaypointIndex = mockPlayerState.nextWaypointIndex;
             let isWin = false;
@@ -435,9 +524,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 isWin = checkWinCondition(projectedPos, stateAfterWaypointCheck);
             }
             
-            return { 
-                pos: projectedPos, 
-                crashPos: crashPos, 
+            const projectedMove = {
+                pos: projectedPos,
+                crashPos: crashPos,
                 isSafe: isTrackSafe,
                 isWin: isWin,
                 ax: ax,
@@ -445,6 +534,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 v: projectedV,
                 nextWaypointIndex: nextWaypointIndex
             };
+
+            // projection logging removed to keep console minimal
+
+            return projectedMove;
         }
 
         function calculatePossibleMoves() {
@@ -463,7 +556,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             };
 
             ACCELERATIONS.forEach(accel => {
-                allProjectedMoves.push(getProjectedMove(mockPlayerState, accel.ax, accel.ay));
+                allProjectedMoves.push(getProjectedMove(mockPlayerState, accel.ax, accel.ay, myPlayerId));
             });
         }
         
@@ -495,11 +588,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 for (let x = 0; x < GRID_WIDTH; x++) {
                     const tile = track.map[y][x];
                     ctx.fillStyle = '#ffffff'; // Default to white for '.' (track)
-                    
+
                     if (tile === 'X') {
                         ctx.fillStyle = '#1f2937'; // Dark gray for 'X' (wall)
-                    } else if (tile.match(/[1-3]/)) {
-                        ctx.fillStyle = '#fef3c7'; // Light yellow for Waypoints
                     } else if (tile === 'S') {
                         ctx.fillStyle = '#d1fae5'; // Light green for Finish/Start area
                     } else if (tile === 'A' || tile === 'B') {
@@ -508,14 +599,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     
                     ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
                     
-                    // Draw checkpoint numbers
-                    if (tile.match(/[1-3]/)) {
-                        ctx.fillStyle = '#92400e'; 
-                        ctx.font = `${CELL_SIZE * 0.7}px Arial`;
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(tile, x * CELL_SIZE + CELL_SIZE / 2, y * CELL_SIZE + CELL_SIZE / 2);
-                    }
+                    // Waypoint markers (1-3) intentionally not drawn to players
                 }
             }
         }
@@ -607,8 +691,270 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             calculatePossibleMoves(); // Always calculate before rendering
             drawPossibleMoves();
 
+            // 2.5 Draw optimal AI move (if available)
+            // Compute AI planned path if in AI mode and it's appropriate
+            if (localGameMode === 'ai' && gameState && gameState.players) {
+                // Recompute path whenever it's not the AI's turn OR when AI state changed
+                const aiState = gameState.players.find(p => p.id === 2);
+                if (aiState) {
+                    // Build a startState for BFS from current AI state
+                    const startState = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
+                        const searchResult = bfsFindPath(startState, 100000, 2);
+                    aiPlannedPath = (searchResult && searchResult.path) ? searchResult.path : null;
+                    // Log concise AI search status only when it changes
+                    const signature = `${startState.pos.x.toFixed(2)}|${startState.pos.y.toFixed(2)}|${startState.v.dx}|${startState.v.dy}|${searchResult ? searchResult.status : 'no_search'}`;
+                    if (signature !== lastAISearchSignature) {
+                        lastAISearchSignature = signature;
+                        try {
+                            console.log(`AI_SEARCH status=${searchResult ? searchResult.status : 'error'} explored=${searchResult ? searchResult.explored : 0}`);
+                        } catch (e) {}
+                    }
+                }
+            }
+
+            // Prefer drawing BFS path (green) if available and user wants it
+            if (showAIPath) drawAIPath();
+            if (showAIPath) drawOptimalMove();
+
+            // If player requested their optimal path, compute and draw it (light orange)
+            if (showPlayerPath && gameState) {
+                const myState = gameState.players.find(p => p.id === myPlayerId);
+                if (myState) {
+                        const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 100000, myPlayerId);
+                    playerPlannedPath = res && res.path ? res.path : null;
+                }
+                // Draw player path if computed
+                if (playerPlannedPath && playerPlannedPath.length > 0) {
+                    try {
+                        ctx.strokeStyle = 'rgba(245,158,11,0.28)'; // amber
+                        ctx.lineWidth = 2;
+                        const me = gameState.players.find(p => p.id === myPlayerId);
+                        ctx.beginPath();
+                        ctx.moveTo(me.pos.x * CELL_SIZE, me.pos.y * CELL_SIZE);
+                        for (let step of playerPlannedPath) ctx.lineTo(step.pos.x * CELL_SIZE, step.pos.y * CELL_SIZE);
+                        ctx.stroke();
+
+                        ctx.fillStyle = 'rgba(245,158,11,0.28)';
+                        for (let step of playerPlannedPath) {
+                            ctx.beginPath(); ctx.arc(step.pos.x * CELL_SIZE, step.pos.y * CELL_SIZE, CELL_SIZE / 6, 0, Math.PI * 2); ctx.fill();
+                        }
+                    } catch (e) {}
+                }
+            }
+
             // 3. Draw Cars (last, so they are on top)
             drawCars();
+        }
+
+        // Return the best AI move (simple heuristic: prefer winning > safe > furthest along nextWaypoint)
+        function getBestAIMove() {
+            if (!gameState) return null;
+            const aiState = gameState.players.find(p => p.id === 2);
+            if (!aiState) return null;
+
+            const mock = { pos: aiState.pos, v: aiState.v, prevPos: aiState.prevPos, nextWaypointIndex: aiState.nextWaypointIndex };
+            const moves = ACCELERATIONS.map(a => getProjectedMove(mock, a.ax, a.ay, 2));
+
+            // Prefer winning moves
+            let chosen = moves.find(m => m.isWin);
+            if (chosen) return chosen;
+
+            // Prefer safe moves and pick the one with largest increase in nextWaypointIndex, then by Manhattan speed progress
+            const safeMoves = moves.filter(m => m.isSafe);
+            if (safeMoves.length > 0) {
+                safeMoves.sort((a, b) => {
+                    if (a.nextWaypointIndex !== b.nextWaypointIndex) return b.nextWaypointIndex - a.nextWaypointIndex;
+                    const aDist = Math.abs(a.v.dx) + Math.abs(a.v.dy);
+                    const bDist = Math.abs(b.v.dx) + Math.abs(b.v.dy);
+                    return bDist - aDist;
+                });
+                return safeMoves[0];
+            }
+
+            // Fallback: return any move (first)
+            return moves[0] || null;
+        }
+
+        // Draw the AI's optimal move in a light color so the player can see it
+        function drawOptimalMove() {
+            if (!gameState) return;
+            // Prefer showing a full planned path if available
+            if (aiPlannedPath && aiPlannedPath.length > 0) {
+                try {
+                    ctx.strokeStyle = 'rgba(59,130,246,0.35)'; // light blue path
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    const aiState = gameState.players.find(p => p.id === 2);
+                    ctx.moveTo(aiState.pos.x * CELL_SIZE, aiState.pos.y * CELL_SIZE);
+                    for (let step of aiPlannedPath) {
+                        ctx.lineTo(step.pos.x * CELL_SIZE, step.pos.y * CELL_SIZE);
+                    }
+                    ctx.stroke();
+
+                    // Draw small dots at each planned step
+                    ctx.fillStyle = 'rgba(59,130,246,0.28)';
+                    for (let step of aiPlannedPath) {
+                        ctx.beginPath();
+                        ctx.arc(step.pos.x * CELL_SIZE, step.pos.y * CELL_SIZE, CELL_SIZE / 6, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                } catch (e) {}
+                return;
+            }
+
+            // Fallback to single best move if no planned path
+            const best = getBestAIMove();
+            if (!best) return;
+
+            // Draw a subtle line and dot for the best move
+            try {
+                const centerX = best.pos.x * CELL_SIZE;
+                const centerY = best.pos.y * CELL_SIZE;
+                ctx.strokeStyle = 'rgba(59,130,246,0.45)'; // light blue
+                ctx.lineWidth = 2;
+                const aiState = gameState.players.find(p => p.id === 2);
+                ctx.beginPath();
+                ctx.moveTo(aiState.pos.x * CELL_SIZE, aiState.pos.y * CELL_SIZE);
+                ctx.lineTo(centerX, centerY);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.fillStyle = 'rgba(59,130,246,0.35)';
+                ctx.arc(centerX, centerY, CELL_SIZE / 4, 0, Math.PI * 2);
+                ctx.fill();
+            } catch (e) {}
+        }
+
+        // Dijkstra-like search (cost = turns) that accounts for skip-turn penalties on crashes.
+        // Returns { path, status, explored } where path is array of { pos, move } from start -> goal
+        function bfsFindPath(startState, maxSteps = 5000, actorId = null) {
+                // We'll treat each action (one acceleration applied) as taking 1 turn when safe.
+                // If the move causes a crash, the cost is 1 (the turn used) + skipTurns penalty (Manhattan speed of attempted move).
+                // Use a priority queue implemented with a simple array since typical search spaces are moderate.
+                function stateKey(s) {
+                    return `${s.pos.x.toFixed(3)}|${s.pos.y.toFixed(3)}|${s.v.dx}|${s.v.dy}|${s.nextWaypointIndex}`;
+                }
+
+                const startNode = { pos: { x: startState.pos.x, y: startState.pos.y }, v: { dx: startState.v.dx, dy: startState.v.dy }, prev: null, move: null, nextWaypointIndex: startState.nextWaypointIndex };
+
+                const frontier = [{ node: startNode, cost: 0 }]; // priority queue by cost (min first)
+                const bestCost = new Map();
+                bestCost.set(stateKey(startNode), 0);
+
+                let exploredCount = 0;
+                let iterations = 0;
+
+                while (frontier.length > 0 && iterations < maxSteps) {
+                    // pop min-cost
+                    frontier.sort((a, b) => a.cost - b.cost);
+                    const current = frontier.shift();
+                    const node = current.node;
+                    const costSoFar = current.cost;
+                    iterations++;
+
+                    // Goal test: if passed all waypoints and next vector crosses finish
+                    if (node.nextWaypointIndex >= WAYPOINT_SEQUENCE.length) {
+                        const projectedPos = { x: node.pos.x + node.v.dx, y: node.pos.y + node.v.dy };
+                        if (checkWinCondition(projectedPos, { pos: node.pos, prevPos: node.prevPos || node.pos, v: node.v, nextWaypointIndex: node.nextWaypointIndex })) {
+                            // reconstruct path
+                            const path = [];
+                            let cur = node;
+                            while (cur && cur.move !== null) {
+                                path.unshift({ pos: cur.pos, move: cur.move });
+                                cur = cur.prev;
+                            }
+                            return { path: path, status: 'found', explored: exploredCount };
+                        }
+                    }
+
+                    // Expand neighbors
+                    for (let accel of ACCELERATIONS) {
+                        const projectedV = { dx: node.v.dx + accel.ax, dy: node.v.dy + accel.ay };
+                        const manhattanD = Math.abs(projectedV.dx) + Math.abs(projectedV.dy);
+                        if (manhattanD > MAX_VELOCITY_MANHATTAN_DISTANCE) continue; // invalid by speed
+
+                        const projectedPos = { x: node.pos.x + projectedV.dx, y: node.pos.y + projectedV.dy };
+                        const crash = checkCollision(node.pos, projectedPos);
+                        const isSafe = crash === null;
+
+                        // Player collision checks (if actorId provided)
+                        let finalIsSafe = isSafe;
+                        let crashReason = null;
+                        if (actorId !== null && gameState) {
+                            const opponent = gameState.players.find(p => p.id !== actorId);
+                            if (opponent) {
+                                if (Math.abs(projectedPos.x - opponent.pos.x) < 0.001 && Math.abs(projectedPos.y - opponent.pos.y) < 0.001) {
+                                    finalIsSafe = false;
+                                    crashReason = 'player_collision';
+                                }
+                                if (opponent.prevPos && segmentsIntersect(node.pos, projectedPos, opponent.prevPos, opponent.pos)) {
+                                    finalIsSafe = false;
+                                    crashReason = 'cross_opponent';
+                                }
+                            }
+                        }
+
+                        const nextWaypointIndex = (function() {
+                            let idx = node.nextWaypointIndex;
+                            if (idx < WAYPOINT_SEQUENCE.length) {
+                                const nextTileType = WAYPOINT_SEQUENCE[idx];
+                                if (checkVectorCrossedTileType(node.pos, projectedPos, nextTileType)) idx++;
+                            }
+                            return idx;
+                        })();
+
+                        // compute cost for this action
+                        // base cost is 1 turn; if crash occurs, add penalty equal to Manhattan speed of attempted move (min 1)
+                        let actionCost = 1;
+                        if (!finalIsSafe) {
+                            const attemptedSpeed = Math.abs(projectedV.dx) + Math.abs(projectedV.dy);
+                            actionCost += Math.max(1, Math.floor(attemptedSpeed));
+                        }
+
+                        const child = {
+                            pos: finalIsSafe ? projectedPos : node.pos,
+                            prev: node,
+                            move: { ax: accel.ax, ay: accel.ay },
+                            v: finalIsSafe ? projectedV : { dx: 0, dy: 0 },
+                            nextWaypointIndex: finalIsSafe ? nextWaypointIndex : node.nextWaypointIndex,
+                            crashReason: crashReason
+                        };
+
+                        const key = stateKey(child);
+                        const newCost = costSoFar + actionCost;
+                        const prevBest = bestCost.has(key) ? bestCost.get(key) : Infinity;
+                        if (newCost < prevBest) {
+                            bestCost.set(key, newCost);
+                            frontier.push({ node: child, cost: newCost });
+                            exploredCount++;
+                        }
+                    }
+                }
+
+                if (iterations >= maxSteps) return { path: null, status: 'limited', explored: exploredCount };
+                return { path: null, status: 'not_found', explored: exploredCount };
+            }
+
+        function drawAIPath() {
+            if (!aiPlannedPath || aiPlannedPath.length === 0) return;
+            try {
+                ctx.strokeStyle = 'rgba(16,185,129,0.28)'; // soft green for planned path
+                ctx.lineWidth = 2;
+                const aiState = gameState.players.find(p => p.id === 2);
+                ctx.beginPath();
+                ctx.moveTo(aiState.pos.x * CELL_SIZE, aiState.pos.y * CELL_SIZE);
+                for (let step of aiPlannedPath) {
+                    ctx.lineTo(step.pos.x * CELL_SIZE, step.pos.y * CELL_SIZE);
+                }
+                ctx.stroke();
+
+                ctx.fillStyle = 'rgba(16,185,129,0.28)';
+                for (let step of aiPlannedPath) {
+                    ctx.beginPath();
+                    ctx.arc(step.pos.x * CELL_SIZE, step.pos.y * CELL_SIZE, CELL_SIZE / 6, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } catch (e) {}
         }
 
         function centerViewOnPlayer() {
@@ -687,6 +1033,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 statusEl.textContent = `Opponent's Turn... ${playerTurnV} | ${nextGoal}`;
             }
 
+            // Show skip-turn info for players
+            try {
+                const skipEl = document.getElementById('skipInfo');
+                if (skipEl) {
+                    const parts = [];
+                    gameState.players.forEach(p => {
+                        if (p.skipTurns && p.skipTurns > 0) parts.push(`P${p.id} skipped: ${p.skipTurns}`);
+                    });
+                    skipEl.textContent = parts.join(' | ');
+                }
+            } catch (e) {}
+
             // Draw and center view
             render();
             centerViewOnPlayer();
@@ -694,14 +1052,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
         // --- Game Actions ---
 
-        async function applyMove(move) {
-            if (!gameState || gameState.currentTurn !== myPlayerId) return;
+        async function applyMove(move, actorId = null) {
+            // actorId: optional override for who is performing the move (1 or 2).
+            if (!gameState) return;
+            const actingPlayer = actorId !== null ? actorId : myPlayerId;
+            if (gameState.currentTurn !== actingPlayer) return;
 
-            const playerIndex = gameState.players.findIndex(p => p.id === myPlayerId);
+            // Simplified logging: only print state after applying a move (see below)
+
+            const playerIndex = gameState.players.findIndex(p => p.id === actingPlayer);
             if (playerIndex === -1) return;
 
-            const nextPlayerId = myPlayerId === 1 ? 2 : 1;
-            const newStatus = move.isWin ? (myPlayerId === 1 ? 'P1_won' : 'P2_won') : 'playing';
+            const newStatus = move.isWin ? (actingPlayer === 1 ? 'P1_won' : 'P2_won') : 'playing';
 
             const newPlayerState = { ...gameState.players[playerIndex] };
 
@@ -712,20 +1074,84 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 newPlayerState.v = move.v;
                 newPlayerState.nextWaypointIndex = move.nextWaypointIndex;
                 newPlayerState.safe = true;
+                newPlayerState.skipTurns = newPlayerState.skipTurns || 0;
             } else {
                 // Illegal move (crash/speed): reset position and velocity
-                newPlayerState.prevPos = newPlayerState.pos; 
+                // Skip as many turns as the Manhattan speed of the attempted move (minimum 1)
+                newPlayerState.prevPos = newPlayerState.pos;
                 newPlayerState.v = { dx: 0, dy: 0 };
-                newPlayerState.safe = false; 
+                newPlayerState.safe = false;
+                try {
+                    const manhattan = Math.abs(move.v.dx || 0) + Math.abs(move.v.dy || 0);
+                    newPlayerState.skipTurns = Math.max(1, Math.floor(manhattan));
+                } catch (e) {
+                    newPlayerState.skipTurns = (newPlayerState.skipTurns || 0) + 1;
+                }
             }
-            
-            // Create the update object
+
+            // Create the update object (we'll compute currentTurn below after modifying players)
             const updates = {
-                currentTurn: newStatus === 'playing' ? nextPlayerId : myPlayerId, // If game over, currentTurn is the winner
                 status: newStatus,
                 players: [...gameState.players]
             };
             updates.players[playerIndex] = newPlayerState;
+
+            // Helper to compute next player id respecting skipTurns
+            function computeNextTurn(players, fromId) {
+                // players is array of player states; rotate to next id and skip those with skipTurns>0 (decrement when skipping)
+                let idx = players.findIndex(p => p.id === fromId);
+                if (idx === -1) return fromId;
+                // try next player in cycle
+                for (let i = 1; i <= players.length; i++) {
+                    const candidate = players[(idx + i) % players.length];
+                    if (candidate.skipTurns && candidate.skipTurns > 0) {
+                        // decrement skipped player's skipTurns (they lose one skipped turn)
+                        candidate.skipTurns = Math.max(0, candidate.skipTurns - 1);
+                        continue;
+                    }
+                    return candidate.id;
+                }
+                return fromId; // fallback
+            }
+
+            // Determine next turn (unless game over)
+            if (newStatus === 'playing') {
+                updates.currentTurn = computeNextTurn(updates.players, actingPlayer);
+            } else {
+                updates.currentTurn = actingPlayer; // winner
+            }
+
+            // Local / AI mode: apply in-memory
+            if (localGameMode === 'local' || localGameMode === 'ai') {
+                gameState = { ...gameState, ...updates };
+                // Ensure player2Id marker for UI decisions
+                if (!gameState.player2Id) gameState.player2Id = localGameMode === 'ai' ? 'AI' : 'LOCAL';
+                // Switch the human-controlled myPlayerId in local two-player so clicks map to current turn
+                if (localGameMode === 'local') {
+                    myPlayerId = gameState.currentTurn;
+                }
+                updateUI();
+
+                // Log state after applying move locally
+                try { printPlayersState('afterApplyMove_local'); } catch (e) {}
+
+                // If AI mode and it's now AI's turn, schedule AI move
+                if (localGameMode === 'ai' && gameState.currentTurn === 2 && gameState.status === 'playing') {
+                    if (aiThinkingTimeout) clearTimeout(aiThinkingTimeout);
+                    aiThinkingTimeout = setTimeout(() => aiMakeMove(), 400 + Math.random() * 400);
+                }
+                // Recompute player planned path if showing
+                if (showPlayerPath) {
+                    const myState = gameState.players.find(p => p.id === myPlayerId);
+                    if (myState) {
+                            const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 3000, myPlayerId);
+                        playerPlannedPath = res && res.path ? res.path : null;
+                    }
+                } else {
+                    playerPlannedPath = null;
+                }
+                return;
+            }
 
             try {
                 const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${gameHash}`);
@@ -734,6 +1160,31 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 console.error("Error applying move:", error);
                 document.getElementById('statusMessage').textContent = 'Error saving move. Check console.';
             }
+            try { printPlayersState('afterApplyMove_remote'); } catch (e) {}
+        }
+
+        // Simple AI: evaluate possible accelerations for player 2 and pick a move
+        function aiMakeMove() {
+            if (!gameState || gameState.currentTurn !== 2) return;
+            // If we have a planned BFS path, use its first move
+            if (aiPlannedPath && aiPlannedPath.length > 0) {
+                const first = aiPlannedPath[0];
+                if (first && typeof first.move !== 'undefined') {
+                    const mock = { pos: gameState.players.find(p => p.id === 2).pos, v: gameState.players.find(p => p.id === 2).v, nextWaypointIndex: gameState.players.find(p => p.id === 2).nextWaypointIndex };
+                    const projected = getProjectedMove(mock, first.move.ax, first.move.ay, 2);
+                    if (projected) {
+                        applyMove(projected, 2);
+                        // Drop the executed step from planned path
+                        aiPlannedPath.shift();
+                        return;
+                    }
+                }
+            }
+
+            // Fallback: heuristic
+            const best = getBestAIMove();
+            if (!best) return;
+            applyMove(best, 2);
         }
         
         function handleCanvasClick(event) {
@@ -799,6 +1250,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     }
 
                     showView('gameView');
+                    // NOTE: Do not print players state on snapshot to avoid noise; state is printed after moves.
+                    // Clear any cached AI path when remote state updates
+                    aiPlannedPath = null;
                     updateUI();
 
                 } else {
@@ -832,9 +1286,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 player2Id: null,
                 players: [
                     // Player 1 (Blue) starts with the initial velocity
-                    { id: 1, pos: p1Start, prevPos: p1Start, v: initialV, nextWaypointIndex: 0, safe: true },
+                    { id: 1, pos: p1Start, prevPos: p1Start, v: initialV, nextWaypointIndex: 0, safe: true, skipTurns: 0 },
                     // Player 2 (Red) also starts with the same initial velocity
-                    { id: 2, pos: p2Start, prevPos: p2Start, v: initialV, nextWaypointIndex: 0, safe: true }
+                    { id: 2, pos: p2Start, prevPos: p2Start, v: initialV, nextWaypointIndex: 0, safe: true, skipTurns: 0 }
                 ]
             };
 
@@ -842,11 +1296,69 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 const gameRef = firebase.doc(db, `artifacts/${appId}/public/data/racetrack_games/${newHash}`);
                 await firebase.setDoc(gameRef, newGameState);
                 setupGameListener(newHash);
+                localGameMode = 'online';
             } catch (error) {
                 console.error("Error creating game:", error);
             } finally {
                 document.getElementById('createSpinner').style.display = 'none';
             }
+        }
+
+        // Start a local two-player game that runs entirely in-memory (both players on same browser)
+        function startLocalGame() {
+            localGameMode = 'local';
+            const newHash = generateGameHash();
+            const p1Start = track.startPositions.player1;
+            const p2Start = track.startPositions.player2;
+            const initialV = getInitialVelocity();
+
+            gameHash = newHash;
+            gameState = {
+                gameHash: newHash,
+                status: 'playing',
+                currentTurn: 1,
+                player1Id: 'LOCAL_P1',
+                player2Id: 'LOCAL_P2',
+                players: [
+                    { id: 1, pos: p1Start, prevPos: p1Start, v: initialV, nextWaypointIndex: 0, safe: true, skipTurns: 0 },
+                    { id: 2, pos: p2Start, prevPos: p2Start, v: initialV, nextWaypointIndex: 0, safe: true, skipTurns: 0 }
+                ]
+            };
+            // Start with human controlling player1
+            myPlayerId = 1;
+            aiPlannedPath = null;
+            showView('gameView');
+            updateUI();
+            render();
+            centerViewOnPlayer();
+        }
+
+        // Start a local game vs AI (AI is player 2)
+        function startAIGame() {
+            localGameMode = 'ai';
+            const newHash = generateGameHash();
+            const p1Start = track.startPositions.player1;
+            const p2Start = track.startPositions.player2;
+            const initialV = getInitialVelocity();
+
+            gameHash = newHash;
+            gameState = {
+                gameHash: newHash,
+                status: 'playing',
+                currentTurn: 1,
+                player1Id: 'HUMAN_P1',
+                player2Id: 'AI',
+                players: [
+                    { id: 1, pos: p1Start, prevPos: p1Start, v: initialV, nextWaypointIndex: 0, safe: true, skipTurns: 0 },
+                    { id: 2, pos: p2Start, prevPos: p2Start, v: initialV, nextWaypointIndex: 0, safe: true, skipTurns: 0 }
+                ]
+            };
+            myPlayerId = 1;
+            aiPlannedPath = null;
+            showView('gameView');
+            updateUI();
+            render();
+            centerViewOnPlayer();
         }
 
         async function joinGame(hash) {
@@ -912,14 +1424,16 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         
         // --- Initialization and Event Listeners ---
 
-        function initFirebase() {
-            if (!firebaseConfig.projectId) {
-                document.getElementById('connectionStatus').textContent = 'ERROR: Firebase config missing.';
+        async function initFirebase() {
+            // Load firebase config at runtime
+            firebaseConfig = await loadFirebaseConfig();
+            if (!firebaseConfig || !firebaseConfig.projectId) {
+                document.getElementById('connectionStatus').textContent = 'ERROR: Firebase config missing. See config.example.json.';
                 return;
             }
             
-            // For debugging: Set Firestore log level
-            firebase.setLogLevel('debug');
+            // Avoid verbose Firestore logs in the console during normal runs
+            try { firebase.setLogLevel('error'); } catch (e) {}
 
             app = firebase.initializeApp(firebaseConfig);
             db = firebase.getFirestore(app);
@@ -956,6 +1470,11 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         window.onload = function() {
             // Attach event listeners
             document.getElementById('createGameBtn').addEventListener('click', createGame);
+            // Local and AI mode buttons
+            const localBtn = document.getElementById('localGameBtn');
+            if (localBtn) localBtn.addEventListener('click', startLocalGame);
+            const aiBtn = document.getElementById('playAIBtn');
+            if (aiBtn) aiBtn.addEventListener('click', startAIGame);
             document.getElementById('joinGameForm').addEventListener('submit', (e) => {
                 e.preventDefault();
                 const hash = document.getElementById('gameIdInput').value.toUpperCase().trim();
@@ -977,7 +1496,49 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             });
 
             initFirebase();
+            // Initialize path visibility checkboxes
+            try {
+                const aiCheckbox = document.getElementById('showAIPathCheckbox');
+                const playerCheckbox = document.getElementById('showPlayerPathCheckbox');
+                    if (aiCheckbox) {
+                        aiCheckbox.checked = showAIPath;
+                        aiCheckbox.addEventListener('change', (e) => {
+                            showAIPath = e.target.checked;
+                            localStorage.setItem(PREF_SHOW_AI_PATH, showAIPath ? 'true' : 'false');
+                            try { render(); } catch (err) {}
+                        });
+                    }
+                    if (playerCheckbox) {
+                        playerCheckbox.checked = showPlayerPath;
+                        playerCheckbox.addEventListener('change', (e) => {
+                            showPlayerPath = e.target.checked;
+                            localStorage.setItem(PREF_SHOW_PLAYER_PATH, showPlayerPath ? 'true' : 'false');
+                            if (showPlayerPath && gameState) {
+                                const myState = gameState.players.find(p => p.id === myPlayerId);
+                                if (myState) {
+                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 3000, myPlayerId);
+                                    playerPlannedPath = res && res.path ? res.path : null;
+                                }
+                            } else {
+                                playerPlannedPath = null;
+                            }
+                            try { render(); } catch (err) {}
+                        });
+
+                        // If preference is enabled on load, compute initial path
+                        if (showPlayerPath && gameState) {
+                            const myState = gameState.players.find(p => p.id === myPlayerId);
+                            if (myState) {
+                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 3000, myPlayerId);
+                                    playerPlannedPath = res && res.path ? res.path : null;
+                                }
+                        }
+                    }
+            } catch (e) {}
+
         }
     </script>
+    <!-- Last saved timestamp and preferences UI injected by script -->
+    <div id="lastSavedBadge" style="position:fixed; left:6px; bottom:6px; background:rgba(0,0,0,0.6); color:#fff; padding:6px 8px; border-radius:6px; font-size:12px; z-index:200;">LAST_SAVED: <!-- timestamp --></div>
 </body>
 </html>
