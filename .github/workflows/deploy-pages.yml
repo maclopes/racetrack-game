@@ -51,6 +51,10 @@ jobs:
           rsync -av --exclude '.git' --exclude '.github' ./ _site/
           # Now, explicitly move the generated config.json into the _site directory
           mv config.json _site/
+          # Create a .artifactignore file in the _site directory to override the top-level .gitignore.
+          # An empty .artifactignore would also work, but being explicit is clearer.
+          # This ensures upload-pages-artifact includes config.json.
+          echo '!config.json' > _site/.artifactignore
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
