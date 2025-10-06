@@ -45,14 +45,20 @@ jobs:
               "measurementId": "${{ secrets.FIREBASE_MEASUREMENT_ID }}"
             }
 
+      - name: Prepare deployment artifact
+        run: |
+          mkdir -p _site
+          mv config.json _site/
+          cp index.html _site/
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
       - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload the repository root (adjust if your built site is in another folder)
-          path: '.'
+          # Upload the dedicated build folder
+          path: './_site'
 
       - name: Deploy to GitHub Pages
         id: deployment
