@@ -196,16 +196,37 @@
         let firebaseConfig = null;
 
         async function loadFirebaseConfig() {
-            if (window.__FIREBASE_CONFIG__) return window.__FIREBASE_CONFIG__;
-            try {
-                const res = await fetch('/config.json', { cache: 'no-store' });
-                if (!res.ok) throw new Error('no-config');
-                const cfg = await res.json();
-                return cfg;
-            } catch (e) {
-                console.error('Firebase config not found. Provide /config.json (gitignored) or set window.__FIREBASE_CONFIG__. See config.example.json.');
-                return null;
+            // 1) Prefer host-injected config
+            if (window.__FIREBASE_CONFIG__) {
+                console.log('Firebase config: using window.__FIREBASE_CONFIG__');
+                return window.__FIREBASE_CONFIG__;
             }
+
+            // Helper to try fetching a path and report status
+            async function tryFetch(path) {
+                try {
+                    const r = await fetch(path, { cache: 'no-store' });
+                    console.log(`Trying ${path} -> ${r.status}`);
+                    if (!r.ok) return null;
+                    const j = await r.json();
+                    return j;
+                } catch (err) {
+                    console.warn(`Fetch ${path} failed:`, err && err.message ? err.message : err);
+                    return null;
+                }
+            }
+
+            // 2) Try relative path first (useful when serving from repo root)
+            let cfg = await tryFetch('./config.json');
+            if (cfg) return cfg;
+
+            // 3) Try absolute path (site root)
+            cfg = await tryFetch('/config.json');
+            if (cfg) return cfg;
+
+            // 4) Not found — provide actionable guidance
+            console.error('Firebase config not found. To run locally: (A) create a file `config.json` next to index.html and serve via HTTP, or (B) set window.__FIREBASE_CONFIG__ from DevTools. See config.example.json for the shape.');
+            return null;
         }
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
