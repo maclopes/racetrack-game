@@ -261,6 +261,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 `;
         const WAYPOINT_SEQUENCE = ['1', '2', '3'];
         const MAX_VELOCITY_MANHATTAN_DISTANCE = 6;
+        const BFS_MAX_STEPS = 100000; // Max iterations for pathfinding search
         const ACCELERATIONS = [
             { ax: -1, ay: -1 }, { ax: 0, ay: -1 }, { ax: 1, ay: -1 },
             { ax: -1, ay: 0 }, { ax: 0, ay: 0 }, { ax: 1, ay: 0 },
@@ -711,26 +712,24 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             calculatePossibleMoves(); // Always calculate before rendering
             drawPossibleMoves();
 
-            // 2.5 Draw optimal AI move (if available)
-            // Compute AI planned path if in AI mode and it's appropriate
-            if (localGameMode === 'ai' && gameState && gameState.players) {
-                // Recompute path whenever it's not the AI's turn OR when AI state changed
-                const aiState = gameState.players.find(p => p.id === 2);
-                if (aiState) {
-                    // Build a startState for BFS from current AI state
-                    const startState = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
-                        const searchResult = bfsFindPath(startState, 100000, 2);
-                    aiPlannedPath = (searchResult && searchResult.path) ? searchResult.path : null;
-                    // Log concise AI search status only when it changes
-                    const signature = `${startState.pos.x.toFixed(2)}|${startState.pos.y.toFixed(2)}|${startState.v.dx}|${startState.v.dy}|${searchResult ? searchResult.status : 'no_search'}`;
-                    if (signature !== lastAISearchSignature) {
-                        lastAISearchSignature = signature;
-                        try {
-                            console.log(`AI_SEARCH status=${searchResult ? searchResult.status : 'error'} explored=${searchResult ? searchResult.explored : 0}`);
-                        } catch (e) {}
-                    }
-                }
-            }
+            // 2.5 Compute AI planned path if needed (path is null or AI crashed)
+            if (localGameMode === 'ai' && gameState && gameState.players && (!aiPlannedPath || aiPlannedPath.length === 0)) {
+                 const aiState = gameState.players.find(p => p.id === 2);
+                 if (aiState) {
+                     // Build a startState for BFS from current AI state
+                     const startState = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
+                     const searchResult = bfsFindPath(startState, BFS_MAX_STEPS, 2);
+                     aiPlannedPath = (searchResult && searchResult.path) ? searchResult.path : null;
+                     // Log concise AI search status only when it changes
+                     const signature = `${startState.pos.x.toFixed(2)}|${startState.pos.y.toFixed(2)}|${startState.v.dx}|${startState.v.dy}|${searchResult ? searchResult.status : 'no_search'}`;
+                     if (signature !== lastAISearchSignature) {
+                         lastAISearchSignature = signature;
+                         try {
+                             console.log(`AI_SEARCH status=${searchResult ? searchResult.status : 'error'} explored=${searchResult ? searchResult.explored : 0}`);
+                         } catch (e) {}
+                     }
+                 }
+             }
 
             // Prefer drawing BFS path (green) if available and user wants it
             if (showAIPath) drawAIPath();
@@ -738,12 +737,14 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
             // If player requested their optimal path, compute and draw it (light orange)
             if (showPlayerPath && gameState) {
-                const myState = gameState.players.find(p => p.id === myPlayerId);
-                if (myState) {
-                        const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 100000, myPlayerId);
-                    playerPlannedPath = res && res.path ? res.path : null;
-                }
-                // Draw player path if computed
+                 // Only re-compute if the path is null or empty
+                 if (!playerPlannedPath || playerPlannedPath.length === 0) {
+                     const myState = gameState.players.find(p => p.id === myPlayerId);
+                     if (myState) {
+                         const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                         playerPlannedPath = res && res.path ? res.path : null;
+                     }
+                 }
                 if (playerPlannedPath && playerPlannedPath.length > 0) {
                     try {
                         ctx.strokeStyle = 'rgba(245,158,11,0.28)'; // amber
@@ -901,7 +902,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         let finalIsSafe = isSafe;
                         let crashReason = null;
                         if (actorId !== null && gameState) {
-                            const opponent = gameState.players.find(p => p.id !== actorId);
+                            // Only check for player collisions if it's the actor's turn. This must match getProjectedMove's logic.
+                            if (gameState.currentTurn === actorId) {
+                                const opponent = gameState.players.find(p => p.id !== actorId);
                             if (opponent) {
                                 if (Math.abs(projectedPos.x - opponent.pos.x) < 0.001 && Math.abs(projectedPos.y - opponent.pos.y) < 0.001) {
                                     finalIsSafe = false;
@@ -911,6 +914,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                                     finalIsSafe = false;
                                     crashReason = 'cross_opponent';
                                 }
+                            }
                             }
                         }
 
@@ -1102,6 +1106,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 newPlayerState.v = { dx: 0, dy: 0 };
                 newPlayerState.safe = false;
                 try {
+                    // Invalidate any planned paths since a crash occurred
+                    if (actingPlayer === 2) aiPlannedPath = null;
+                    if (actingPlayer === myPlayerId) playerPlannedPath = null;
+
                     const manhattan = Math.abs(move.v.dx || 0) + Math.abs(move.v.dy || 0);
                     newPlayerState.skipTurns = Math.max(1, Math.floor(manhattan));
                 } catch (e) {
@@ -1152,23 +1160,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 }
                 updateUI();
 
-                // Log state after applying move locally
-                try { printPlayersState('afterApplyMove_local'); } catch (e) {}
-
                 // If AI mode and it's now AI's turn, schedule AI move
                 if (localGameMode === 'ai' && gameState.currentTurn === 2 && gameState.status === 'playing') {
                     if (aiThinkingTimeout) clearTimeout(aiThinkingTimeout);
                     aiThinkingTimeout = setTimeout(() => aiMakeMove(), 400 + Math.random() * 400);
-                }
-                // Recompute player planned path if showing
-                if (showPlayerPath) {
-                    const myState = gameState.players.find(p => p.id === myPlayerId);
-                    if (myState) {
-                            const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 3000, myPlayerId);
-                        playerPlannedPath = res && res.path ? res.path : null;
-                    }
-                } else {
-                    playerPlannedPath = null;
                 }
                 return;
             }
@@ -1180,31 +1175,56 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 console.error("Error applying move:", error);
                 document.getElementById('statusMessage').textContent = 'Error saving move. Check console.';
             }
-            try { printPlayersState('afterApplyMove_remote'); } catch (e) {}
         }
 
         // Simple AI: evaluate possible accelerations for player 2 and pick a move
         function aiMakeMove() {
             if (!gameState || gameState.currentTurn !== 2) return;
-            // If we have a planned BFS path, use its first move
+
+            // If we have a planned BFS path, validate and use its first move
             if (aiPlannedPath && aiPlannedPath.length > 0) {
                 const first = aiPlannedPath[0];
                 if (first && typeof first.move !== 'undefined') {
-                    const mock = { pos: gameState.players.find(p => p.id === 2).pos, v: gameState.players.find(p => p.id === 2).v, nextWaypointIndex: gameState.players.find(p => p.id === 2).nextWaypointIndex };
+                    const aiCurrentState = gameState.players.find(p => p.id === 2);
+                    const mock = { pos: aiCurrentState.pos, v: aiCurrentState.v, nextWaypointIndex: aiCurrentState.nextWaypointIndex };
                     const projected = getProjectedMove(mock, first.move.ax, first.move.ay, 2);
-                    if (projected) {
+                    
+                    // If the planned move is now unsafe (e.g., opponent moved into the path), invalidate the plan.
+                    // The code will then proceed to recalculate a new path.
+                    if (projected && !projected.isSafe) {
+                        aiPlannedPath = null; // Invalidate the entire path
+                    } else if (projected) {
+                        // The planned move is safe, so execute it.
                         applyMove(projected, 2);
-                        // Drop the executed step from planned path
                         aiPlannedPath.shift();
                         return;
                     }
                 }
             }
 
-            // Fallback: heuristic
+            // If there's no valid plan, calculate a new one now and execute the first step.
+            const aiState = gameState.players.find(p => p.id === 2);
+            const startState = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
+            const searchResult = bfsFindPath(startState, BFS_MAX_STEPS, 2);
+            aiPlannedPath = (searchResult && searchResult.path) ? searchResult.path : null;
+
+            // Now that a new path is calculated, try to execute the first step again.
+            if (aiPlannedPath && aiPlannedPath.length > 0) {
+                const first = aiPlannedPath[0];
+                if (first && typeof first.move !== 'undefined') {
+                    const mock = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
+                    const projected = getProjectedMove(mock, first.move.ax, first.move.ay, 2);
+                    if (projected) {
+                        applyMove(projected, 2);
+                        aiPlannedPath.shift();
+                        return;
+                    }
+                }
+            }
+
+            // Ultimate fallback: if even the freshly calculated path is invalid (should be rare), use the simple heuristic.
             const best = getBestAIMove();
-            if (!best) return;
-            applyMove(best, 2);
+            if (best) applyMove(best, 2);
         }
         
         function handleCanvasClick(event) {
@@ -1239,6 +1259,14 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 );
 
                 if (distance < clickTolerance) {
+                    // If the chosen move is not the first step of the planned path, invalidate the plan.
+                    if (playerPlannedPath && playerPlannedPath.length > 0) {
+                        const plannedMove = playerPlannedPath[0].move;
+                        if (plannedMove.ax !== move.ax || plannedMove.ay !== move.ay) {
+                            playerPlannedPath = null;
+                        }
+                    }
+                    if (playerPlannedPath) playerPlannedPath.shift(); // Consume the step
                     applyMove(move);
                     return; 
                 }
@@ -1270,9 +1298,9 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     }
 
                     showView('gameView');
-                    // NOTE: Do not print players state on snapshot to avoid noise; state is printed after moves.
-                    // Clear any cached AI path when remote state updates
+                    // Clear any cached paths when remote state updates, as the opponent's move invalidates our plan.
                     aiPlannedPath = null;
+                    playerPlannedPath = null;
                     updateUI();
 
                 } else {
@@ -1546,7 +1574,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                             if (showPlayerPath && gameState) {
                                 const myState = gameState.players.find(p => p.id === myPlayerId);
                                 if (myState) {
-                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 3000, myPlayerId);
+                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
                                     playerPlannedPath = res && res.path ? res.path : null;
                                 }
                             } else {
@@ -1559,7 +1587,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         if (showPlayerPath && gameState) {
                             const myState = gameState.players.find(p => p.id === myPlayerId);
                             if (myState) {
-                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, 3000, myPlayerId);
+                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
                                     playerPlannedPath = res && res.path ? res.path : null;
                                 }
                         }
