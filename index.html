@@ -201,31 +201,74 @@
                 console.log('Firebase config: using window.__FIREBASE_CONFIG__');
                 return window.__FIREBASE_CONFIG__;
             }
-
             // Helper to try fetching a path and report status
             async function tryFetch(path) {
                 try {
                     const r = await fetch(path, { cache: 'no-store' });
                     console.log(`Trying ${path} -> ${r.status}`);
-                    if (!r.ok) return null;
-                    const j = await r.json();
-                    return j;
+                    if (!r.ok) return { ok: false, path, status: r.status };
+                    try {
+                        const j = await r.json();
+                        return { ok: true, path, json: j };
+                    } catch (parseErr) {
+                        console.warn(`Parse failed for ${path}:`, parseErr && parseErr.message ? parseErr.message : parseErr);
+                        return { ok: false, path, status: r.status, parseError: parseErr };
+                    }
                 } catch (err) {
                     console.warn(`Fetch ${path} failed:`, err && err.message ? err.message : err);
-                    return null;
+                    return { ok: false, path, fetchError: err };
                 }
             }
 
-            // 2) Try relative path first (useful when serving from repo root)
-            let cfg = await tryFetch('./config.json');
-            if (cfg) return cfg;
+            // Build a list of candidate locations to try. GitHub Pages often serves from a repo subpath
+            // so we attempt several sensible URLs derived from the current location.
+            const candidates = [];
+            // Common/relative forms
+            candidates.push('./config.json');
+            candidates.push('config.json');
+            // Absolute site root
+            candidates.push('/config.json');
 
-            // 3) Try absolute path (site root)
-            cfg = await tryFetch('/config.json');
-            if (cfg) return cfg;
+            // Try using the current document base path. Example: https://user.github.io/repo-name/
+            try {
+                const loc = window.location;
+                // directory where index.html lives
+                const pathnameDir = loc.pathname.replace(/\/[^/]*$/, '/');
+                if (pathnameDir && pathnameDir !== '/') {
+                    candidates.push(pathnameDir + 'config.json');
+                    // also try with origin
+                    candidates.push(loc.origin + pathnameDir + 'config.json');
+                }
 
-            // 4) Not found — provide actionable guidance
-            console.error('Firebase config not found. To run locally: (A) create a file `config.json` next to index.html and serve via HTTP, or (B) set window.__FIREBASE_CONFIG__ from DevTools. See config.example.json for the shape.');
+                // Try first path segment as common repo name (e.g. /repo-name/config.json)
+                const segments = loc.pathname.split('/').filter(Boolean);
+                if (segments.length > 0) {
+                    candidates.push('/' + segments[0] + '/config.json');
+                    candidates.push(loc.origin + '/' + segments[0] + '/config.json');
+                }
+            } catch (e) {
+                // ignore
+            }
+
+            const diagnostics = [];
+            for (const path of candidates) {
+                const res = await tryFetch(path);
+                if (res && res.ok && res.json && res.json.projectId) {
+                    console.log('Loaded firebase config from', res.path);
+                    return res.json;
+                }
+                diagnostics.push(res);
+            }
+
+            // Not found — provide actionable guidance both in console and UI
+            console.error('Firebase config not found. Candidates tried:', diagnostics.map(d => `${d.path} (ok:${d.ok}${d.status?` status:${d.status}`:''}${d.parseError?` parseError:${d.parseError.message}`:''}${d.fetchError?` fetchError:${d.fetchError.message}`:''})`).join('; '));
+            // Update the connectionStatus element with actionable steps
+            try {
+                const el = document.getElementById('connectionStatus');
+                if (el) {
+                    el.textContent = 'ERROR: Firebase config missing. See config.example.json and ensure a valid `config.json` is served alongside this page.';
+                }
+            } catch (e) {}
             return null;
         }
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
@@ -1449,7 +1492,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             // Load firebase config at runtime
             firebaseConfig = await loadFirebaseConfig();
             if (!firebaseConfig || !firebaseConfig.projectId) {
-                document.getElementById('connectionStatus').textContent = 'ERROR: Firebase config missing. See config.example.json.';
+                console.error('Firebase config missing after loadFirebaseConfig(). See config.example.json.');
                 return;
             }
             
