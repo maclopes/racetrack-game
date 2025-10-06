@@ -277,7 +277,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         let GRID_HEIGHT = 0;
         let CANVAS_WIDTH = 0;
         let CANVAS_HEIGHT = 0;
-        let track = { map: [], startPositions: { player1: null, player2: null } };
+        let track = { map: [], startPositions: { player1: null, player2: null }, waypoints: {} };
         let allProjectedMoves = []; // Moves for the *current* human player
     let aiPlannedPath = null; // Cached full path for AI (array of positions/moves)
     let playerPlannedPath = null; // Cached full path for the human player (when requested)
@@ -346,6 +346,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             try {
                 const mapLines = TRACK_CONFIG_STRING.trim().split('\n').map(line => line.trim()).filter(line => line.length > 0);
                 
+                track.waypoints = {};
                 track.map = [];
                 track.startPositions = { player1: null, player2: null };
                 GRID_HEIGHT = mapLines.length;
@@ -374,6 +375,14 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                             track.startPositions.player1 = { x: x + 0.5, y: y + 0.5 };
                         } else if (line[x] === 'B') {
                             track.startPositions.player2 = { x: x + 0.5, y: y + 0.5 };
+                        }
+                        // Pre-calculate waypoint and finish line coordinates for the A* heuristic
+                        const tile = line[x];
+                        if (WAYPOINT_SEQUENCE.includes(tile) || tile === 'S') {
+                            if (!track.waypoints[tile]) {
+                                track.waypoints[tile] = [];
+                            }
+                            track.waypoints[tile].push({ x: x + 0.5, y: y + 0.5 });
                         }
                     }
                 }
@@ -718,7 +727,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                  if (aiState) {
                      // Build a startState for BFS from current AI state
                      const startState = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
-                     const searchResult = bfsFindPath(startState, BFS_MAX_STEPS, 2);
+                     console.time('AI Path Calculation');
+                     const searchResult = findOptimalPath(startState, BFS_MAX_STEPS, 2);
+                     console.timeEnd('AI Path Calculation');
+
                      aiPlannedPath = (searchResult && searchResult.path) ? searchResult.path : null;
                      // Log concise AI search status only when it changes
                      const signature = `${startState.pos.x.toFixed(2)}|${startState.pos.y.toFixed(2)}|${startState.v.dx}|${startState.v.dy}|${searchResult ? searchResult.status : 'no_search'}`;
@@ -741,7 +753,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                  if (!playerPlannedPath || playerPlannedPath.length === 0) {
                      const myState = gameState.players.find(p => p.id === myPlayerId);
                      if (myState) {
-                         const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                         console.time('Player Path Calculation');
+                         const res = findOptimalPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                         console.timeEnd('Player Path Calculation');
+
                          playerPlannedPath = res && res.path ? res.path : null;
                      }
                  }
@@ -846,29 +861,101 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             } catch (e) {}
         }
 
+        // A simple and efficient Min-Priority Queue implementation using a binary heap.
+        // This is critical for the performance of the A* search algorithm.
+        class PriorityQueue {
+            constructor() {
+                this.heap = [];
+            }
+
+            enqueue(element, priority) {
+                this.heap.push({ element, priority });
+                this.bubbleUp(this.heap.length - 1);
+            }
+
+            dequeue() {
+                if (this.isEmpty()) {
+                    return null;
+                }
+                this.swap(0, this.heap.length - 1);
+                const { element } = this.heap.pop();
+                if (!this.isEmpty()) {
+                    this.sinkDown(0);
+                }
+                return element;
+            }
+
+            bubbleUp(index) {
+                let parentIndex = Math.floor((index - 1) / 2);
+                while (index > 0 && this.heap[index].priority < this.heap[parentIndex].priority) {
+                    this.swap(index, parentIndex);
+                    index = parentIndex;
+                    parentIndex = Math.floor((index - 1) / 2);
+                }
+            }
+
+            sinkDown(index) {
+                let leftChildIndex = 2 * index + 1;
+                let rightChildIndex = 2 * index + 2;
+                let smallest = index;
+
+                if (leftChildIndex < this.heap.length && this.heap[leftChildIndex].priority < this.heap[smallest].priority) {
+                    smallest = leftChildIndex;
+                }
+                if (rightChildIndex < this.heap.length && this.heap[rightChildIndex].priority < this.heap[smallest].priority) {
+                    smallest = rightChildIndex;
+                }
+
+                if (smallest !== index) {
+                    this.swap(index, smallest);
+                    this.sinkDown(smallest);
+                }
+            }
+
+            swap(i, j) { [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]]; }
+            isEmpty() { return this.heap.length === 0; }
+        }
+
         // Dijkstra-like search (cost = turns) that accounts for skip-turn penalties on crashes.
         // Returns { path, status, explored } where path is array of { pos, move } from start -> goal
-        function bfsFindPath(startState, maxSteps = 5000, actorId = null) {
-                // We'll treat each action (one acceleration applied) as taking 1 turn when safe.
-                // If the move causes a crash, the cost is 1 (the turn used) + skipTurns penalty (Manhattan speed of attempted move).
-                // Use a priority queue implemented with a simple array since typical search spaces are moderate.
+        function findOptimalPath(startState, maxSteps = 5000, actorId = null) {
+                // Heuristic `h`: estimates turns to goal. Admissible since max speed is a constant.
+                function heuristic(node) {
+                    let targetTiles = [];
+                    if (node.nextWaypointIndex < WAYPOINT_SEQUENCE.length) {
+                        targetTiles = track.waypoints[WAYPOINT_SEQUENCE[node.nextWaypointIndex]] || [];
+                    } else {
+                        targetTiles = track.waypoints['S'] || [];
+                    }
+                    if (targetTiles.length === 0) return 0; // No goal, no heuristic
+
+                    // Find the closest target tile to the node's position
+                    let minDistance = Infinity;
+                    for (const target of targetTiles) {
+                        const dist = Math.abs(node.pos.x - target.x) + Math.abs(node.pos.y - target.y);
+                        if (dist < minDistance) minDistance = dist;
+                    }
+                    
+                    return minDistance / MAX_VELOCITY_MANHATTAN_DISTANCE;
+                }
+
                 function stateKey(s) {
                     return `${s.pos.x.toFixed(3)}|${s.pos.y.toFixed(3)}|${s.v.dx}|${s.v.dy}|${s.nextWaypointIndex}`;
                 }
 
                 const startNode = { pos: { x: startState.pos.x, y: startState.pos.y }, v: { dx: startState.v.dx, dy: startState.v.dy }, prev: null, move: null, nextWaypointIndex: startState.nextWaypointIndex };
 
-                const frontier = [{ node: startNode, cost: 0 }]; // priority queue by cost (min first)
+                const frontier = new PriorityQueue();
+                frontier.enqueue({ node: startNode, cost: 0 }, 0 + heuristic(startNode));
+
                 const bestCost = new Map();
                 bestCost.set(stateKey(startNode), 0);
 
                 let exploredCount = 0;
                 let iterations = 0;
 
-                while (frontier.length > 0 && iterations < maxSteps) {
-                    // pop min-cost
-                    frontier.sort((a, b) => a.cost - b.cost);
-                    const current = frontier.shift();
+                while (!frontier.isEmpty() && iterations < maxSteps) {
+                    const current = frontier.dequeue();
                     const node = current.node;
                     const costSoFar = current.cost;
                     iterations++;
@@ -949,7 +1036,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         const prevBest = bestCost.has(key) ? bestCost.get(key) : Infinity;
                         if (newCost < prevBest) {
                             bestCost.set(key, newCost);
-                            frontier.push({ node: child, cost: newCost });
+                            frontier.enqueue({ node: child, cost: newCost }, newCost + heuristic(child));
                             exploredCount++;
                         }
                     }
@@ -1205,7 +1292,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             // If there's no valid plan, calculate a new one now and execute the first step.
             const aiState = gameState.players.find(p => p.id === 2);
             const startState = { pos: aiState.pos, v: aiState.v, nextWaypointIndex: aiState.nextWaypointIndex };
-            const searchResult = bfsFindPath(startState, BFS_MAX_STEPS, 2);
+            console.time('AI Path Recalculation (in aiMakeMove)');
+            const searchResult = findOptimalPath(startState, BFS_MAX_STEPS, 2);
+            console.timeEnd('AI Path Recalculation (in aiMakeMove)');
+
             aiPlannedPath = (searchResult && searchResult.path) ? searchResult.path : null;
 
             // Now that a new path is calculated, try to execute the first step again.
@@ -1298,9 +1388,18 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                     }
 
                     showView('gameView');
-                    // Clear any cached paths when remote state updates, as the opponent's move invalidates our plan.
-                    aiPlannedPath = null;
-                    playerPlannedPath = null;
+                    // Invalidate cached paths only if the opponent's new position conflicts with the plan.
+                    const opponent = gameState.players.find(p => p.id !== myPlayerId);
+                    if (opponent && aiPlannedPath) {
+                        for (const step of aiPlannedPath) {
+                            if (Math.abs(step.pos.x - opponent.pos.x) < 0.1 && Math.abs(step.pos.y - opponent.pos.y) < 0.1) {
+                                aiPlannedPath = null; // Opponent is on our path, invalidate.
+                                break;
+                            }
+                        }
+                    }
+                    // Always invalidate player path on opponent move, as it's less critical and simpler.
+                    playerPlannedPath = null; 
                     updateUI();
 
                 } else {
@@ -1574,7 +1673,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                             if (showPlayerPath && gameState) {
                                 const myState = gameState.players.find(p => p.id === myPlayerId);
                                 if (myState) {
-                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                                    console.time('Player Path Calculation (Checkbox)');
+                                    const res = findOptimalPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                                    console.timeEnd('Player Path Calculation (Checkbox)');
+
                                     playerPlannedPath = res && res.path ? res.path : null;
                                 }
                             } else {
@@ -1587,7 +1689,10 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         if (showPlayerPath && gameState) {
                             const myState = gameState.players.find(p => p.id === myPlayerId);
                             if (myState) {
-                                    const res = bfsFindPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                                    console.time('Player Path Calculation (Checkbox)');
+                                    const res = findOptimalPath({ pos: myState.pos, v: myState.v, nextWaypointIndex: myState.nextWaypointIndex }, BFS_MAX_STEPS, myPlayerId);
+                                    console.timeEnd('Player Path Calculation (Checkbox)');
+
                                     playerPlannedPath = res && res.path ? res.path : null;
                                 }
                         }
