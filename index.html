@@ -232,6 +232,7 @@
         let app, db, auth;
         let userId = null;
         let gameListener = null;
+        let firebaseInitialized = false;
 
     // --- Game State Variables ---
     let gameState = null; // Holds the current state from Firestore or local
@@ -1446,7 +1447,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
         async function initFirebase() {
             // Load firebase config at runtime
             firebaseConfig = await loadFirebaseConfig();
-            if (!firebaseConfig || !firebaseConfig.projectId) {
+            if (!firebaseConfig || !firebaseConfig.projectId || firebaseInitialized) {
                 console.error('Firebase config missing after loadFirebaseConfig(). See config.example.json.');
                 return;
             }
@@ -1458,7 +1459,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
             db = firebase.getFirestore(app);
             auth = firebase.getAuth(app);
 
-            // CRITICAL STEP: Load track configuration and dimensions early
+            // Load track configuration and dimensions early
             loadTrackConfig(); 
             render(); 
 
@@ -1481,15 +1482,25 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                         return;
                     }
                 }
+                firebaseInitialized = true;
                 document.getElementById('connectionStatus').textContent = 'Ready to play.';
                 showView('lobbyView');
             });
         }
 
         window.onload = function() {
+            // Load track config and render the initial empty state immediately.
+            // Firebase will be initialized on-demand when an online action is taken.
+            loadTrackConfig();
+            render();
+            document.getElementById('connectionStatus').textContent = 'Ready to play.';
+            showView('lobbyView');
+
             // Attach event listeners
-            document.getElementById('createGameBtn').addEventListener('click', createGame);
-            // Local and AI mode buttons
+            document.getElementById('createGameBtn').addEventListener('click', async () => {
+                if (!firebaseInitialized) await initFirebase();
+                createGame();
+            });
             const localBtn = document.getElementById('localGameBtn');
             if (localBtn) localBtn.addEventListener('click', startLocalGame);
             const aiBtn = document.getElementById('playAIBtn');
@@ -1498,6 +1509,7 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 e.preventDefault();
                 const hash = document.getElementById('gameIdInput').value.toUpperCase().trim();
                 if (hash.length === 5) {
+                    if (!firebaseInitialized) await initFirebase();
                     joinGame(hash);
                 }
             });
@@ -1514,7 +1526,6 @@ XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
                 centerViewOnPlayer();
             });
 
-            initFirebase();
             // Initialize path visibility checkboxes
             try {
                 const aiCheckbox = document.getElementById('showAIPathCheckbox');
