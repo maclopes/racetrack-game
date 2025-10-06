@@ -52,6 +52,9 @@ jobs:
           mkdir -p _site
           cp index.html _site/
           mv config.json _site/
+          # Create a .artifactignore file to ensure upload-pages-artifact includes config.json,
+          # overriding the top-level .gitignore. An empty file would also work.
+          touch _site/.artifactignore
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
