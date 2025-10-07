@@ -333,26 +333,24 @@ export function centerViewOnPlayer(gameState, myPlayerId, canvasContainer, CELL_
     });
 }
 
-export function drawEmptyTrack(allTracks, drawnPoints = []) {
-    const emptyTrack = allTracks.find(t => t.name === 'Empty Track');
-    if (!emptyTrack) return;
+export function drawEmptyTrack(mapData, drawnPoints = []) {
+    if (!mapData || mapData.length === 0) return;
 
     const drawCanvas = document.getElementById('drawCanvas');
     const drawCtx = drawCanvas.getContext('2d');
-    const mapLines = emptyTrack.configString.trim().split('\n').map(line => line.trim());
-    const gridHeight = mapLines.length;
-    const gridWidth = mapLines.length > 0 ? mapLines[0].length : 0;
+    const gridHeight = mapData.length;
+    const gridWidth = mapData.length > 0 ? mapData[0].length : 0;
     const cellSize = 12;
 
     drawCanvas.width = gridWidth * cellSize;
     drawCanvas.height = gridHeight * cellSize;
 
     // Create a temporary track object for drawGrid
-    const tempTrack = { map: mapLines.map(line => Array.from(line)) };
+    const tempTrack = { map: mapData };
 
     for (let y = 0; y < gridHeight; y++) {
         for (let x = 0; x < gridWidth; x++) {
-            const tile = mapLines[y][x];
+            const tile = mapData[y][x];
             if (tile === 'A' || tile === 'B') {
                 drawCtx.fillStyle = '#ffffff'; // Draw start positions as empty track
             } else {
@@ -367,7 +365,7 @@ export function drawEmptyTrack(allTracks, drawnPoints = []) {
     // Draw the user-created points and lines
     if (drawnPoints.length > 0) {
         // Draw lines
-        drawCtx.strokeStyle = '#3b82f6'; // Blue
+        drawCtx.strokeStyle = 'rgba(59, 130, 246, 0.7)'; // Semi-transparent Blue
         drawCtx.lineWidth = 5*cellSize;
         drawCtx.beginPath();
         const startPoint = drawnPoints[0];

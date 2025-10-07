@@ -32,10 +32,51 @@ let showAIPath = localStorage.getItem(PREF_SHOW_AI_PATH) === 'true';
 let showPlayerPath = localStorage.getItem(PREF_SHOW_PLAYER_PATH) === 'true';
 
 let drawnPoints = []; // For the track drawing view
+let drawingTrackMap = []; // For the track drawing view
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const canvasContainer = document.getElementById('canvasContainer');
 let CELL_SIZE = 12;
+
+function bresenhamLine(x0, y0, x1, y1) {
+    const points = [];
+    let dx = Math.abs(x1 - x0);
+    let dy = -Math.abs(y1 - y0);
+    let sx = x0 < x1 ? 1 : -1;
+    let sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+
+    while (true) {
+        points.push({ x: x0, y: y0 });
+        if (x0 === x1 && y0 === y1) break;
+        let e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+    return points;
+}
+
+function carveTrack(lastPoint, newPoint) {
+    const lineCells = bresenhamLine(lastPoint.x, lastPoint.y, newPoint.x, newPoint.y);
+    const gridHeight = drawingTrackMap.length;
+    const gridWidth = drawingTrackMap[0].length;
+
+    for (let y = 0; y < gridHeight; y++) {
+        for (let x = 0; x < gridWidth; x++) {
+            if (lineCells.some(p => Math.abs(p.x - x) + Math.abs(p.y - y) <= 2)) {
+                if (drawingTrackMap[y] && drawingTrackMap[y][x] !== undefined) {
+                    drawingTrackMap[y][x] = '.';
+                }
+            }
+        }
+    }
+}
 
 function printPlayersState(context) {
     try {
@@ -230,8 +271,12 @@ window.onload = async function() {
         }
     });
     document.getElementById('drawTrackBtn').addEventListener('click', () => {
-        drawnPoints = []; // Clear any previously drawn points
-        drawEmptyTrack(ALL_TRACKS, drawnPoints);
+        drawnPoints = [];
+        const emptyTrack = ALL_TRACKS.find(t => t.name === 'Empty Track');
+        if (emptyTrack) {
+            drawingTrackMap = emptyTrack.configString.trim().split('\n').map(line => Array.from(line.trim()));
+        }
+        drawEmptyTrack(drawingTrackMap, drawnPoints);
         showView('drawTrackView');
     });
     document.getElementById('backToLobbyBtn').addEventListener('click', () => showView('lobbyView'));
@@ -327,17 +372,20 @@ window.onload = async function() {
                 console.log(`Move too large (Manhattan distance: ${manhattanDistance}). From {x:${lastPoint.x}, y:${lastPoint.y}} to {x:${gridX}, y:${gridY}}. Ignoring.`);
                 return; // Ignore click if distance is too great
             }
+            carveTrack(lastPoint, { x: gridX, y: gridY });
         }
 
         drawnPoints.push({ x: gridX, y: gridY });
-        drawEmptyTrack(ALL_TRACKS, drawnPoints); // Redraw with the new point/line
+        drawEmptyTrack(drawingTrackMap, drawnPoints); // Redraw with the new point/line
     });
 
     drawCanvas.addEventListener('contextmenu', (event) => {
         event.preventDefault(); // Prevent the default right-click menu
         if (drawnPoints.length > 0) {
             drawnPoints.pop(); // Remove the last point
-            drawEmptyTrack(ALL_TRACKS, drawnPoints); // Redraw the track
+            // Note: This doesn't "undo" the carving, just removes the point/line visually.
+            // A full undo would require saving map states.
+            drawEmptyTrack(drawingTrackMap, drawnPoints); // Redraw the track
         }
     });
 }
