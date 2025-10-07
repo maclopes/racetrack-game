@@ -1,4 +1,4 @@
-import { PREF_SHOW_AI_PATH, PREF_SHOW_PLAYER_PATH, ACCELERATIONS } from './config.js';
+import { PREF_SHOW_AI_PATH, PREF_SHOW_PLAYER_PATH, ACCELERATIONS, WAYPOINT_SEQUENCE, BFS_MAX_STEPS } from './config.js';
 import { generateGameHash, customConfirm } from './utils.js';
 import { loadFirebaseConfig, loadAllTracks, loadTrackConfig, computeAndSaveHeuristics } from './file-loading.js';
 import { getInitialVelocity, getProjectedMove } from './game-mechanics.js';
@@ -33,6 +33,7 @@ let showPlayerPath = localStorage.getItem(PREF_SHOW_PLAYER_PATH) === 'true';
 
 let drawnPoints = []; // For the track drawing view
 let drawingTrackMap = []; // For the track drawing view
+let isDrawingFinished = false; // For the track drawing view
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const canvasContainer = document.getElementById('canvasContainer');
@@ -70,12 +71,142 @@ function carveTrack(lastPoint, newPoint) {
     for (let y = 0; y < gridHeight; y++) {
         for (let x = 0; x < gridWidth; x++) {
             if (lineCells.some(p => Math.abs(p.x - x) + Math.abs(p.y - y) <= 2)) {
-                if (drawingTrackMap[y] && drawingTrackMap[y][x] !== undefined) {
-                    drawingTrackMap[y][x] = '.';
+                // Ensure we don't carve into the 2-cell border
+                if (x > 1 && x < gridWidth - 2 && y > 1 && y < gridHeight - 2) {
+                    if (!['A', 'B', 'S'].includes(drawingTrackMap[y][x])) {
+                        drawingTrackMap[y][x] = '.';
+                    }
                 }
             }
         }
     }
+}
+
+function placeStartFinishLine(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+
+    // Get a normalized perpendicular vector. This points "left" of the drawing direction.
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len === 0) return; // Avoid division by zero if points are the same
+    const perpDx = -dy / len;
+    const perpDy = dx / len;
+
+    // Define the positions for S, A, B relative to the first point (p1)
+    const positions = {
+        'A': { x: p1.x, y: p1.y },
+        'B': { x: p1.x + perpDx, y: p1.y + perpDy },
+        'S_left': { x: p1.x + 2 * perpDx, y: p1.y + 2 * perpDy },
+        'S_right': { x: p1.x - perpDx, y: p1.y - perpDy }
+    };
+
+    const gridHeight = drawingTrackMap.length;
+    const gridWidth = drawingTrackMap[0].length;
+
+    // Place the markers on the map
+    const placeMarker = (char, pos) => {
+        const gridX = Math.round(pos.x);
+        const gridY = Math.round(pos.y);
+        if (gridX > 1 && gridX < gridWidth - 2 && gridY > 1 && gridY < gridHeight - 2) {
+            drawingTrackMap[gridY][gridX] = char;
+        }
+    };
+
+    placeMarker('A', positions.A);
+    placeMarker('B', positions.B);
+    placeMarker('S', positions.S_left);
+    placeMarker('S', positions.S_right);
+}
+
+function placeWaypointLine(pointIndex, waypointChar) {
+    if (pointIndex <= 0 || pointIndex >= drawnPoints.length - 1) return;
+
+    const p1 = drawnPoints[pointIndex];
+    const p2 = drawnPoints[pointIndex + 1];
+
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len === 0) return;
+    const perpDx = -dy / len;
+    const perpDy = dx / len;
+
+    const gridHeight = drawingTrackMap.length;
+    const gridWidth = drawingTrackMap[0].length;
+
+    // Draw a line of waypoints perpendicular to the track direction
+    for (let i = -2; i <= 2; i++) {
+        const gridX = Math.round(p1.x + i * perpDx);
+        const gridY = Math.round(p1.y + i * perpDy);
+
+        if (gridX > 1 && gridX < gridWidth - 2 && gridY > 1 && gridY < gridHeight - 2) {
+            if (drawingTrackMap[gridY][gridX] === '.') {
+                drawingTrackMap[gridY][gridX] = waypointChar;
+            }
+        }
+    }
+}
+
+function validateDrawnTrack() {
+    const validationMsgEl = document.getElementById('validationMessage');
+    validationMsgEl.textContent = 'Validating...';
+    validationMsgEl.className = 'text-center font-semibold p-3 rounded-lg bg-yellow-100 text-yellow-800';
+
+    // 1. Build a 'track' object from the drawing data
+    const newTrack = {
+        map: drawingTrackMap,
+        waypoints: {},
+        startPositions: { player1: null, player2: null }
+    };
+
+    for (let y = 0; y < drawingTrackMap.length; y++) {
+        for (let x = 0; x < drawingTrackMap[y].length; x++) {
+            const tile = drawingTrackMap[y][x];
+            if (tile === 'A') newTrack.startPositions.player1 = { x: x + 0.5, y: y + 0.5 };
+            if (tile === 'B') newTrack.startPositions.player2 = { x: x + 0.5, y: y + 0.5 };
+            if (WAYPOINT_SEQUENCE.includes(tile) || tile === 'S') {
+                if (!newTrack.waypoints[tile]) newTrack.waypoints[tile] = [];
+                newTrack.waypoints[tile].push({ x: x + 0.5, y: y + 0.5 });
+            }
+        }
+    }
+
+    if (!newTrack.startPositions.player1 || !newTrack.startPositions.player2) {
+        validationMsgEl.textContent = 'Validation Failed: Missing start positions A or B.';
+        validationMsgEl.className = 'text-center font-semibold p-3 rounded-lg bg-red-100 text-red-800';
+        return;
+    }
+
+    // 2. Create a mock gameState to run the validator
+    const mockGameState = {
+        currentTurn: 2,
+        players: [
+            { id: 1, pos: newTrack.startPositions.player1, v: getInitialVelocity(), nextWaypointIndex: 0 },
+            { id: 2, pos: newTrack.startPositions.player2, v: getInitialVelocity(), nextWaypointIndex: 0 }
+        ]
+    };
+
+    // 3. Run the pathfinder from player B's perspective
+    const startState = {
+        pos: newTrack.startPositions.player2,
+        v: getInitialVelocity(),
+        nextWaypointIndex: 0
+    };
+
+    // Use a timeout to allow the UI to update to "Validating..." before the potentially long-running search
+    setTimeout(() => {
+        const result = findOptimalPath(startState, BFS_MAX_STEPS, 2, mockGameState, newTrack);
+
+        if (result && result.path) {
+            validationMsgEl.textContent = `Track is valid! Optimal path found in ${result.path.length} turns.`;
+            validationMsgEl.className = 'text-center font-semibold p-3 rounded-lg bg-green-100 text-green-800';
+            drawEmptyTrack(drawingTrackMap, drawnPoints, result.path, newTrack.startPositions.player2);
+        } else {
+            validationMsgEl.textContent = `Validation Failed: No optimal path found. The track may be impossible. (Status: ${result.status})`;
+            validationMsgEl.className = 'text-center font-semibold p-3 rounded-lg bg-red-100 text-red-800';
+        }
+    }, 50);
 }
 
 function printPlayersState(context) {
@@ -272,6 +403,8 @@ window.onload = async function() {
     });
     document.getElementById('drawTrackBtn').addEventListener('click', () => {
         drawnPoints = [];
+        isDrawingFinished = false;
+        document.getElementById('validationMessage').textContent = '';
         const emptyTrack = ALL_TRACKS.find(t => t.name === 'Empty Track');
         if (emptyTrack) {
             drawingTrackMap = emptyTrack.configString.trim().split('\n').map(line => Array.from(line.trim()));
@@ -357,6 +490,8 @@ window.onload = async function() {
 
     const drawCanvas = document.getElementById('drawCanvas');
     drawCanvas.addEventListener('click', (event) => {
+        if (isDrawingFinished) return; // Ignore clicks if drawing is complete
+
         const cellSize = 12; // This is hardcoded in drawEmptyTrack
         const rect = drawCanvas.getBoundingClientRect();
         const x = event.clientX - rect.left;
@@ -365,12 +500,31 @@ window.onload = async function() {
         const gridX = Math.floor(x / cellSize);
         const gridY = Math.floor(y / cellSize);
 
+        // Check if clicking on the start/finish line to close the loop
+        if (drawnPoints.length > 2 && ['S', 'A', 'B'].includes(drawingTrackMap[gridY][gridX])) {
+            const lastPoint = drawnPoints[drawnPoints.length - 1];
+            const firstPoint = drawnPoints[0];
+            carveTrack(lastPoint, firstPoint);
+
+            placeWaypointLine(Math.floor(drawnPoints.length * 0.25), '1');
+            placeWaypointLine(Math.floor(drawnPoints.length * 0.50), '2');
+            placeWaypointLine(Math.floor(drawnPoints.length * 0.75), '3');
+
+            isDrawingFinished = true;
+            drawEmptyTrack(drawingTrackMap, drawnPoints); // Redraw final track
+            validateDrawnTrack();
+            return;
+        }
+
         if (drawnPoints.length > 0) {
             const lastPoint = drawnPoints[drawnPoints.length - 1];
             const manhattanDistance = Math.abs(gridX - lastPoint.x) + Math.abs(gridY - lastPoint.y);
             if (manhattanDistance > 6) {
                 console.log(`Move too large (Manhattan distance: ${manhattanDistance}). From {x:${lastPoint.x}, y:${lastPoint.y}} to {x:${gridX}, y:${gridY}}. Ignoring.`);
                 return; // Ignore click if distance is too great
+            }
+            if (drawnPoints.length === 1) {
+                placeStartFinishLine(lastPoint, { x: gridX, y: gridY });
             }
             carveTrack(lastPoint, { x: gridX, y: gridY });
         }

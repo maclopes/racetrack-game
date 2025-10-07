@@ -333,7 +333,7 @@ export function centerViewOnPlayer(gameState, myPlayerId, canvasContainer, CELL_
     });
 }
 
-export function drawEmptyTrack(mapData, drawnPoints = []) {
+export function drawEmptyTrack(mapData, drawnPoints = [], validationPath = null, validationStartPos = null) {
     if (!mapData || mapData.length === 0) return;
 
     const drawCanvas = document.getElementById('drawCanvas');
@@ -351,11 +351,17 @@ export function drawEmptyTrack(mapData, drawnPoints = []) {
     for (let y = 0; y < gridHeight; y++) {
         for (let x = 0; x < gridWidth; x++) {
             const tile = mapData[y][x];
-            if (tile === 'A' || tile === 'B') {
-                drawCtx.fillStyle = '#ffffff'; // Draw start positions as empty track
-            } else {
-                drawCtx.fillStyle = tile === 'X' ? '#1f2937' : '#ffffff';
+            let color = '#ffffff'; // Default to white for '.' (track)
+            if (tile === 'X') {
+                color = '#1f2937'; // Dark gray for 'X' (wall)
+            } else if (tile === 'S') {
+                color = '#d1fae5'; // Light green for Finish/Start area
+            } else if (tile === 'A' || tile === 'B') {
+                color = '#99f6e4'; // Teal for initial start positions
+            } else if (['1', '2', '3'].includes(tile)) {
+                color = '#fde68a'; // Light yellow for waypoints
             }
+            drawCtx.fillStyle = color;
             drawCtx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
         }
     }
@@ -366,7 +372,7 @@ export function drawEmptyTrack(mapData, drawnPoints = []) {
     if (drawnPoints.length > 0) {
         // Draw lines
         drawCtx.strokeStyle = 'rgba(59, 130, 246, 0.7)'; // Semi-transparent Blue
-        drawCtx.lineWidth = 5*cellSize;
+        drawCtx.lineWidth = 2;
         drawCtx.beginPath();
         const startPoint = drawnPoints[0];
         drawCtx.moveTo((startPoint.x + 0.5) * cellSize, (startPoint.y + 0.5) * cellSize);
@@ -383,5 +389,28 @@ export function drawEmptyTrack(mapData, drawnPoints = []) {
             drawCtx.arc((point.x + 0.5) * cellSize, (point.y + 0.5) * cellSize, cellSize / 4, 0, Math.PI * 2);
             drawCtx.fill();
         });
+    }
+
+    // Draw the validation path if it exists
+    if (validationPath && validationPath.length > 0 && validationStartPos) {
+        try {
+            drawCtx.strokeStyle = 'rgba(16,185,129,0.4)'; // soft green for planned path
+            drawCtx.lineWidth = 2;
+            drawCtx.beginPath();
+            drawCtx.moveTo(validationStartPos.x * cellSize, validationStartPos.y * cellSize);
+            for (let step of validationPath) {
+                drawCtx.lineTo(step.pos.x * cellSize, step.pos.y * cellSize);
+            }
+            drawCtx.stroke();
+
+            drawCtx.fillStyle = 'rgba(16,185,129,0.4)';
+            for (let step of validationPath) {
+                drawCtx.beginPath();
+                drawCtx.arc(step.pos.x * cellSize, step.pos.y * cellSize, cellSize / 5, 0, Math.PI * 2);
+                drawCtx.fill();
+            }
+        } catch (e) {
+            console.error("Error drawing validation path:", e);
+        }
     }
 }
