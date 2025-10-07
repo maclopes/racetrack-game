@@ -376,8 +376,71 @@ function centerViewOnPlayerWrapper() {
     centerViewOnPlayer(gameState, myPlayerId, canvasContainer);
 }
 
+function addTrackToSelectionUI(trackData, index) {
+    const container = document.getElementById('trackSelectionContainer');
+
+    // Generate preview image
+    const mapLines = trackData.configString.trim().split('\n');
+    const previewWidth = mapLines[0].length * 2; // 2px per cell
+    const previewHeight = mapLines.length * 2;
+    const previewCanvas = document.createElement('canvas');
+    previewCanvas.width = previewWidth;
+    previewCanvas.height = previewHeight;
+    const pCtx = previewCanvas.getContext('2d');
+    for (let y = 0; y < mapLines.length; y++) {
+        for (let x = 0; x < mapLines[y].length; x++) {
+            pCtx.fillStyle = mapLines[y][x] === 'X' ? '#1f2937' : '#d1d5db';
+            pCtx.fillRect(x * 2, y * 2, 2, 2);
+        }
+    }
+    trackData.previewImageURL = previewCanvas.toDataURL();
+
+    // Create UI element
+    const trackElement = document.createElement('div');
+    trackElement.className = 'p-2 border-2 rounded-lg cursor-pointer transition border-gray-300';
+    trackElement.innerHTML = `
+        <img src="${trackData.previewImageURL}" class="w-full h-auto rounded-md border border-gray-400" style="image-rendering: pixelated;"/>
+        <p class="text-center font-semibold mt-2 text-gray-800">${trackData.name}</p>
+    `;
+    trackElement.addEventListener('click', () => {
+        selectTrack(index);
+    });
+    container.appendChild(trackElement);
+}
+
+function selectTrack(index) {
+    if (index < 0 || index >= ALL_TRACKS.length) return;
+
+    loadTrackConfig(index, ALL_TRACKS, track, canvas, canvasContainer);
+    selectedTrackIndex = index;
+    // Update selection visuals
+    document.querySelectorAll('#trackSelectionContainer > div').forEach((el, i) => {
+        el.className = `p-2 border-2 rounded-lg cursor-pointer transition ${i === index ? 'border-blue-600 bg-blue-50' : 'border-gray-300'}`;
+    });
+}
+
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const content = e.target.result;
+        const lines = content.trim().split('\n');
+        const name = lines.shift().replace('::Track ', '').trim();
+        const configString = lines.join('\n');
+        const newTrackData = { name, configString, previewImageURL: null };
+        ALL_TRACKS.push(newTrackData);
+        const newIndex = ALL_TRACKS.length - 1;
+        addTrackToSelectionUI(newTrackData, newIndex);
+        selectTrack(newIndex);
+    };
+    reader.readAsText(file);
+    event.target.value = ''; // Reset file input
+}
+
 window.onload = async function() {
-    const trackData = await loadAllTracks(track, canvas, canvasContainer);
+    const trackData = await loadAllTracks(track, canvas, canvasContainer, selectTrack);
     ALL_TRACKS = trackData.ALL_TRACKS;
     selectedTrackIndex = trackData.selectedTrackIndex;
     loadTrackConfig(selectedTrackIndex, ALL_TRACKS, track, canvas, canvasContainer);
@@ -414,6 +477,11 @@ window.onload = async function() {
         drawEmptyTrack(drawingTrackMap, drawnPoints);
         showView('drawTrackView');
     });
+    const trackUploadInput = document.getElementById('trackUploadInput');
+    document.getElementById('uploadTrackBtn').addEventListener('click', () => {
+        trackUploadInput.click();
+    });
+    trackUploadInput.addEventListener('change', handleFileUpload);
     document.getElementById('backToLobbyBtn').addEventListener('click', () => showView('lobbyView'));
     document.getElementById('localGameBtn').addEventListener('click', startLocalGame);
     document.getElementById('playAIBtn').addEventListener('click', startAIGame);

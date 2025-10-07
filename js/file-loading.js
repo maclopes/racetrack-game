@@ -76,7 +76,7 @@ export function loadTrackConfig(trackIndex, allTracks, track, canvas, canvasCont
     }
 }
 
-export async function loadAllTracks(track, canvas, canvasContainer) {
+export async function loadAllTracks(track, canvas, canvasContainer, selectTrack) {
     let ALL_TRACKS = [];
     let selectedTrackIndex = 0;
     try {
@@ -101,6 +101,9 @@ export async function loadAllTracks(track, canvas, canvasContainer) {
         container.innerHTML = ''; // Clear previous content
 
         ALL_TRACKS.forEach((trackData, index) => {
+            // Do not show the "Empty Track" in the selection list
+            if (trackData.name === 'Empty Track') return;
+
             // Generate preview image
             const mapLines = trackData.configString.trim().split('\n');
             const previewWidth = mapLines[0].length * 2; // 2px per cell
@@ -124,14 +127,7 @@ export async function loadAllTracks(track, canvas, canvasContainer) {
                 <img src="${trackData.previewImageURL}" class="w-full h-auto rounded-md border border-gray-400" style="image-rendering: pixelated;"/>
                 <p class="text-center font-semibold mt-2 text-gray-800">${trackData.name}</p>
             `;
-            trackElement.addEventListener('click', () => {
-                loadTrackConfig(index, ALL_TRACKS, track, canvas, canvasContainer);
-                selectedTrackIndex = index;
-                // Update selection visuals
-                document.querySelectorAll('#trackSelectionContainer > div').forEach((el, i) => {
-                    el.className = `p-2 border-2 rounded-lg cursor-pointer transition ${i === index ? 'border-blue-600 bg-blue-50' : 'border-gray-300'}`;
-                });
-            });
+            trackElement.addEventListener('click', () => selectTrack(index));
             container.appendChild(trackElement);
         });
         return { ALL_TRACKS, selectedTrackIndex };
