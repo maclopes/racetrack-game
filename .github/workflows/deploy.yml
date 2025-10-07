@@ -35,7 +35,7 @@ jobs:
         run: |
           # Use 'sed' to perform the in-place replacement
           # The custom delimiter '|' avoids issues if your hash contains '/'
-          sed -i "s|GIT_VERSION_PLACEHOLDER|${{ env.VERSION_HASH }}|g" index.html
+          sed -i "s|VERSION_COMMIT_HASH|${{ env.VERSION_HASH }}|g" index.html
           
           echo "Updated index.html with version: ${{ env.VERSION_HASH }}"
 
