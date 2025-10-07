@@ -1,41 +1,52 @@
-# 1. Add the workflow name (optional but recommended)
-name: Deploy Application
-
-# 2. Add the 'on' block to define triggers (MANDATORY)
+name: Auto-Version File
 on:
-  # Trigger the workflow on a 'push' event
   push:
-    # Only run if the push is to the 'main' branch
     branches:
       - main
+  # Allows manual triggering for testing
+  workflow_dispatch: 
 
-# ----------------------------------------------------
-# A workflow must have one or more jobs
-# ----------------------------------------------------
 jobs:
-  deploy:
+  update_version:
     runs-on: ubuntu-latest
+    # CRITICAL: Grant permission to push changes back
+    permissions:
+      contents: write 
+      
     steps:
       - name: Checkout repository code
         uses: actions/checkout@v4
-
-      - name: Calculate and Export Version Hash
-        # The 'run' keyword executes the subsequent lines in the shell
+        
+      # ------------------------------------------------------------------
+      # STEP 1: Calculate and Set the Version Variable
+      # ------------------------------------------------------------------
+      - name: Calculate Short Hash
+        id: version_hash
         run: |
-          # 1. Calculate the short hash locally in the shell script
-          VERSION_HASH_TEMP=$(echo $GITHUB_SHA | cut -c1-8)
-          
-          # 2. Export the variable to the GitHub Actions Environment file ($GITHUB_ENV).
-          echo "VERSION_HASH=$VERSION_HASH_TEMP" >> $GITHUB_ENV
-          
-          echo "Version Hash set to $VERSION_HASH_TEMP"
+          # Use GITHUB_SHA (the full commit hash) and cut it to 8 characters
+          VERSION_SHORT_HASH=$(echo $GITHUB_SHA | cut -c1-8)
+          echo "VERSION_HASH=$VERSION_SHORT_HASH" >> $GITHUB_ENV
+          echo "Calculated Hash: $VERSION_SHORT_HASH"
 
-      - name: Deploy using the calculated hash
+      # ------------------------------------------------------------------
+      # STEP 2: Replace the Placeholder in the File
+      # ------------------------------------------------------------------
+      - name: Replace Placeholder in File
         run: |
-          # The variable is now available as a global environment variable for the job
-          echo "Starting deployment for version ${{ env.VERSION_HASH }}"
+          # Use 'sed' to perform the in-place replacement
+          # The custom delimiter '|' avoids issues if your hash contains '/'
+          sed -i "s|GIT_VERSION_PLACEHOLDER|${{ env.VERSION_HASH }}|g" index.html
           
-          # Replace this with your actual deployment command, e.g.:
-          # docker push my-repo/my-app:${{ env.VERSION_HASH }}
-          
-          echo "Deployment successful."
+          echo "Updated index.html with version: ${{ env.VERSION_HASH }}"
+
+      # ------------------------------------------------------------------
+      # STEP 3: Commit and Push the change automatically
+      # ------------------------------------------------------------------
+      - name: Commit and Push updated index.html 🚀
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          # Specify the files you want to commit
+          commit_message: "CI: Auto-update version in index.html to ${{ env.VERSION_HASH }}"
+          files: index.html
+          # Do not create a new workflow run from this automated commit
+          commit_options: '--no-verify --allow-empty'
