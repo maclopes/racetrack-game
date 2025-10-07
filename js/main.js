@@ -201,6 +201,7 @@ function validateDrawnTrack() {
         if (result && result.path) {
             validationMsgEl.textContent = `Track is valid! Optimal path found in ${result.path.length} turns.`;
             validationMsgEl.className = 'text-center font-semibold p-3 rounded-lg bg-green-100 text-green-800';
+            document.getElementById('saveTrackBtn').classList.remove('hidden');
             drawEmptyTrack(drawingTrackMap, drawnPoints, result.path, newTrack.startPositions.player2);
         } else {
             validationMsgEl.textContent = `Validation Failed: No optimal path found. The track may be impossible. (Status: ${result.status})`;
@@ -404,6 +405,7 @@ window.onload = async function() {
     document.getElementById('drawTrackBtn').addEventListener('click', () => {
         drawnPoints = [];
         isDrawingFinished = false;
+        document.getElementById('saveTrackBtn').classList.add('hidden');
         document.getElementById('validationMessage').textContent = '';
         const emptyTrack = ALL_TRACKS.find(t => t.name === 'Empty Track');
         if (emptyTrack) {
@@ -541,5 +543,24 @@ window.onload = async function() {
             // A full undo would require saving map states.
             drawEmptyTrack(drawingTrackMap, drawnPoints); // Redraw the track
         }
+    });
+
+    document.getElementById('saveTrackBtn').addEventListener('click', () => {
+        if (!drawingTrackMap || drawingTrackMap.length === 0) {
+            console.error("No track data to save.");
+            return;
+        }
+
+        const trackName = `::Track Custom ${new Date().toISOString().slice(0, 10)}\n`;
+        const trackString = drawingTrackMap.map(row => row.join('')).join('\n');
+        const fileContent = trackName + trackString + '\n';
+
+        const blob = new Blob([fileContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'custom-track.txt';
+        a.click();
+        URL.revokeObjectURL(url);
     });
 }
