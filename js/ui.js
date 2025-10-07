@@ -368,7 +368,7 @@ export function drawEmptyTrack(allTracks, drawnPoints = []) {
     if (drawnPoints.length > 0) {
         // Draw lines
         drawCtx.strokeStyle = '#3b82f6'; // Blue
-        drawCtx.lineWidth = 2;
+        drawCtx.lineWidth = 5*cellSize;
         drawCtx.beginPath();
         const startPoint = drawnPoints[0];
         drawCtx.moveTo((startPoint.x + 0.5) * cellSize, (startPoint.y + 0.5) * cellSize);
