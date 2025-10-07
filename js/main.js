@@ -31,6 +31,7 @@ let lastAISearchSignature = null;
 let showAIPath = localStorage.getItem(PREF_SHOW_AI_PATH) === 'true';
 let showPlayerPath = localStorage.getItem(PREF_SHOW_PLAYER_PATH) === 'true';
 
+let drawnPoints = []; // For the track drawing view
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const canvasContainer = document.getElementById('canvasContainer');
@@ -229,7 +230,8 @@ window.onload = async function() {
         }
     });
     document.getElementById('drawTrackBtn').addEventListener('click', () => {
-        drawEmptyTrack(ALL_TRACKS);
+        drawnPoints = []; // Clear any previously drawn points
+        drawEmptyTrack(ALL_TRACKS, drawnPoints);
         showView('drawTrackView');
     });
     document.getElementById('backToLobbyBtn').addEventListener('click', () => showView('lobbyView'));
@@ -307,4 +309,35 @@ window.onload = async function() {
             try { renderWrapper(); } catch (err) {}
         });
     }
+
+    const drawCanvas = document.getElementById('drawCanvas');
+    drawCanvas.addEventListener('click', (event) => {
+        const cellSize = 12; // This is hardcoded in drawEmptyTrack
+        const rect = drawCanvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+
+        const gridX = Math.floor(x / cellSize);
+        const gridY = Math.floor(y / cellSize);
+
+        if (drawnPoints.length > 0) {
+            const lastPoint = drawnPoints[drawnPoints.length - 1];
+            const manhattanDistance = Math.abs(gridX - lastPoint.x) + Math.abs(gridY - lastPoint.y);
+            if (manhattanDistance > 6) {
+                console.log(`Move too large (Manhattan distance: ${manhattanDistance}). From {x:${lastPoint.x}, y:${lastPoint.y}} to {x:${gridX}, y:${gridY}}. Ignoring.`);
+                return; // Ignore click if distance is too great
+            }
+        }
+
+        drawnPoints.push({ x: gridX, y: gridY });
+        drawEmptyTrack(ALL_TRACKS, drawnPoints); // Redraw with the new point/line
+    });
+
+    drawCanvas.addEventListener('contextmenu', (event) => {
+        event.preventDefault(); // Prevent the default right-click menu
+        if (drawnPoints.length > 0) {
+            drawnPoints.pop(); // Remove the last point
+            drawEmptyTrack(ALL_TRACKS, drawnPoints); // Redraw the track
+        }
+    });
 }

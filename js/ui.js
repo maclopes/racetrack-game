@@ -333,7 +333,7 @@ export function centerViewOnPlayer(gameState, myPlayerId, canvasContainer, CELL_
     });
 }
 
-export function drawEmptyTrack(allTracks) {
+export function drawEmptyTrack(allTracks, drawnPoints = []) {
     const emptyTrack = allTracks.find(t => t.name === 'Empty Track');
     if (!emptyTrack) return;
 
@@ -341,17 +341,49 @@ export function drawEmptyTrack(allTracks) {
     const drawCtx = drawCanvas.getContext('2d');
     const mapLines = emptyTrack.configString.trim().split('\n').map(line => line.trim());
     const gridHeight = mapLines.length;
-    const gridWidth = mapLines[0].length;
+    const gridWidth = mapLines.length > 0 ? mapLines[0].length : 0;
     const cellSize = 12;
 
     drawCanvas.width = gridWidth * cellSize;
     drawCanvas.height = gridHeight * cellSize;
 
+    // Create a temporary track object for drawGrid
+    const tempTrack = { map: mapLines.map(line => Array.from(line)) };
+
     for (let y = 0; y < gridHeight; y++) {
         for (let x = 0; x < gridWidth; x++) {
             const tile = mapLines[y][x];
-            drawCtx.fillStyle = tile === 'X' ? '#1f2937' : '#ffffff';
+            if (tile === 'A' || tile === 'B') {
+                drawCtx.fillStyle = '#ffffff'; // Draw start positions as empty track
+            } else {
+                drawCtx.fillStyle = tile === 'X' ? '#1f2937' : '#ffffff';
+            }
             drawCtx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
         }
+    }
+
+    drawGrid(drawCtx, tempTrack, cellSize);
+
+    // Draw the user-created points and lines
+    if (drawnPoints.length > 0) {
+        // Draw lines
+        drawCtx.strokeStyle = '#3b82f6'; // Blue
+        drawCtx.lineWidth = 2;
+        drawCtx.beginPath();
+        const startPoint = drawnPoints[0];
+        drawCtx.moveTo((startPoint.x + 0.5) * cellSize, (startPoint.y + 0.5) * cellSize);
+        for (let i = 1; i < drawnPoints.length; i++) {
+            const point = drawnPoints[i];
+            drawCtx.lineTo((point.x + 0.5) * cellSize, (point.y + 0.5) * cellSize);
+        }
+        drawCtx.stroke();
+
+        // Draw points
+        drawCtx.fillStyle = '#3b82f6'; // Blue
+        drawnPoints.forEach(point => {
+            drawCtx.beginPath();
+            drawCtx.arc((point.x + 0.5) * cellSize, (point.y + 0.5) * cellSize, cellSize / 4, 0, Math.PI * 2);
+            drawCtx.fill();
+        });
     }
 }
