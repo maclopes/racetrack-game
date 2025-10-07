@@ -1,13 +1,28 @@
-#!/bin/bash
+# ----------------------------------------------------
+# Steps are where commands are executed
+# ----------------------------------------------------
+steps:
+  - name: Checkout repository code
+    uses: actions/checkout@v4
 
-# 1. Get the first 8 characters of the commit hash for brevity
-VERSION_HASH=$(echo $GITHUB_SHA | cut -c1-8)
+  - name: Calculate and Export Version Hash
+    # The 'run' keyword executes the subsequent lines in the shell
+    run: |
+      # 1. Calculate the short hash locally in the shell script
+      VERSION_HASH_TEMP=$(echo $GITHUB_SHA | cut -c1-8)
+      
+      # 2. Export the variable to the GitHub Actions Environment file ($GITHUB_ENV).
+      # This makes the variable available to all subsequent steps in this job via ${{ env.VERSION_HASH }}.
+      echo "VERSION_HASH=$VERSION_HASH_TEMP" >> $GITHUB_ENV
+      
+      echo "Version Hash set to $VERSION_HASH_TEMP"
 
-# 2. Get the current date/time to show when the build occurred
-BUILD_DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
-
-# 3. Use 'sed' to replace the placeholder in your file
-# NOTE: The command syntax for sed might vary slightly depending on the runner OS (Linux/macOS).
-sed -i "s|VERSION_COMMIT_HASH|${VERSION_HASH} (Built on: ${BUILD_DATE})|g" index.html
-
-echo "Successfully injected version ${VERSION_HASH} into index.html"
+  - name: Deploy using the calculated hash
+    run: |
+      # The variable is now available as a global environment variable for the job
+      echo "Starting deployment for version ${{ env.VERSION_HASH }}"
+      
+      # Replace this with your actual deployment command, e.g.:
+      # docker push my-repo/my-app:${{ env.VERSION_HASH }}
+      
+      echo "Deployment successful."
