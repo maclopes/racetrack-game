@@ -1,28 +1,46 @@
-# ----------------------------------------------------
-# Steps are where commands are executed
-# ----------------------------------------------------
-steps:
-  - name: Checkout repository code
-    uses: actions/checkout@v4
+# Name of the workflow as it appears in the GitHub Actions tab
+name: Deploy Application
 
-  - name: Calculate and Export Version Hash
-    # The 'run' keyword executes the subsequent lines in the shell
-    run: |
-      # 1. Calculate the short hash locally in the shell script
-      VERSION_HASH_TEMP=$(echo $GITHUB_SHA | cut -c1-8)
-      
-      # 2. Export the variable to the GitHub Actions Environment file ($GITHUB_ENV).
-      # This makes the variable available to all subsequent steps in this job via ${{ env.VERSION_HASH }}.
-      echo "VERSION_HASH=$VERSION_HASH_TEMP" >> $GITHUB_ENV
-      
-      echo "Version Hash set to $VERSION_HASH_TEMP"
+# Define when the workflow runs (e.g., on pushes to the 'main' branch)
+on:
+  push:
+    branches:
+      - main
 
-  - name: Deploy using the calculated hash
-    run: |
-      # The variable is now available as a global environment variable for the job
-      echo "Starting deployment for version ${{ env.VERSION_HASH }}"
-      
-      # Replace this with your actual deployment command, e.g.:
-      # docker push my-repo/my-app:${{ env.VERSION_HASH }}
-      
-      echo "Deployment successful."
+# ----------------------------------------------------
+# A workflow must have one or more jobs
+# ----------------------------------------------------
+jobs:
+  # Define a specific job named 'deploy'
+  deploy:
+    # Specify the runner environment for this job
+    runs-on: ubuntu-latest
+    
+    # ----------------------------------------------------
+    # Steps are where commands are executed, nested within the job
+    # ----------------------------------------------------
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v4
+
+      - name: Calculate and Export Version Hash
+        # The 'run' keyword executes the subsequent lines in the shell
+        run: |
+          # 1. Calculate the short hash locally in the shell script
+          VERSION_HASH_TEMP=$(echo $GITHUB_SHA | cut -c1-8)
+          
+          # 2. Export the variable to the GitHub Actions Environment file ($GITHUB_ENV).
+          # This makes the variable available to all subsequent steps in this job via ${{ env.VERSION_HASH }}.
+          echo "VERSION_HASH=$VERSION_HASH_TEMP" >> $GITHUB_ENV
+          
+          echo "Version Hash set to $VERSION_HASH_TEMP"
+
+      - name: Deploy using the calculated hash
+        run: |
+          # The variable is now available as a global environment variable for the job
+          echo "Starting deployment for version ${{ env.VERSION_HASH }}"
+          
+          # Replace this with your actual deployment command, e.g.:
+          # docker push my-repo/my-app:${{ env.VERSION_HASH }}
+          
+          echo "Deployment successful."
