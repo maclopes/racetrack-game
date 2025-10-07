@@ -142,18 +142,22 @@ export async function resetGame(gameState, gameHash, myPlayerId, db, customConfi
         : `Are you sure you want to forfeit this game and start a new one?`;
 
     const confirmed = await customConfirm(confirmMessage);
-    if (!confirmed) return;
+    if (!confirmed) return false;
 
     try {
-        const gameRef = firebase.doc(db, `artifacts/default-app-id/public/data/racetrack_games/${gameHash}`);
-        
-        if (myPlayerId === 1 && gameState.player2Id) {
+        // Only interact with Firebase for online games
+        if (db && gameState.player1Id !== 'LOCAL_P1' && gameState.player1Id !== 'HUMAN_P1') {
+            const gameRef = firebase.doc(db, `artifacts/default-app-id/public/data/racetrack_games/${gameHash}`);
             await firebase.deleteDoc(gameRef);
+            // For online games, the snapshot listener will handle the UI change.
+            // We return true here to indicate the action was confirmed.
+            return true;
         } else {
-            return true; // P2 forfeits or P1 forfeits an empty game
+            // For local or AI games, just confirm the forfeit.
+            return true;
         }
     } catch (error) {
         console.error("Error resetting game:", error);
     }
-    return false;
+    return false; // Return false if an error occurred
 }
