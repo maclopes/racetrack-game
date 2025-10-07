@@ -1,4 +1,17 @@
-# ... (Previous steps for name, on, jobs, runs-on, and checkout)
+# 1. Add the workflow name (optional but recommended)
+name: Deploy Application
+
+# 2. Add the 'on' block to define triggers (MANDATORY)
+on:
+  # Trigger the workflow on a 'push' event
+  push:
+    # Only run if the push is to the 'main' branch
+    branches:
+      - main
+
+# ----------------------------------------------------
+# A workflow must have one or more jobs
+# ----------------------------------------------------
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -7,33 +20,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Calculate and Export Version Hash
-        id: version
+        # The 'run' keyword executes the subsequent lines in the shell
         run: |
-          # The variable is exported to the environment
+          # 1. Calculate the short hash locally in the shell script
           VERSION_HASH_TEMP=$(echo $GITHUB_SHA | cut -c1-8)
+          
+          # 2. Export the variable to the GitHub Actions Environment file ($GITHUB_ENV).
           echo "VERSION_HASH=$VERSION_HASH_TEMP" >> $GITHUB_ENV
+          
           echo "Version Hash set to $VERSION_HASH_TEMP"
 
-      - name: Replace Placeholder in index.html 🛠️
-        # This step uses the shell 'sed' utility for in-place replacement
+      - name: Deploy using the calculated hash
         run: |
-          # 1. Define the variables for clarity
-          VERSION="${{ env.VERSION_HASH }}"
-          OLD_STRING="VERSION_PLACEHOLDER"
-          FILE_PATH="index.html"
+          # The variable is now available as a global environment variable for the job
+          echo "Starting deployment for version ${{ env.VERSION_HASH }}"
           
-          echo "Replacing $OLD_STRING with $VERSION in $FILE_PATH"
+          # Replace this with your actual deployment command, e.g.:
+          # docker push my-repo/my-app:${{ env.VERSION_HASH }}
           
-          # 2. Execute sed command for in-place substitution
-          # We use a custom delimiter like '|' to avoid conflicts with file paths or slashes in version hash
-          # The 'g' flag ensures all occurrences are replaced (global)
-          sed -i "s|$OLD_STRING|$VERSION|g" "$FILE_PATH"
-
-      - name: Verify file change (Optional)
-        run: cat index.html | grep ${{ env.VERSION_HASH }} # Should show the new hash
-
-      - name: Deploy using the modified file
-        run: |
-          echo "Starting deployment for version ${{ env.VERSION_HASH }} with modified index.html"
-          # Your actual deployment command here (e.g., docker push, deploy to S3, etc.)
           echo "Deployment successful."
