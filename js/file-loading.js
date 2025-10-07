@@ -41,11 +41,6 @@ export function loadTrackConfig(trackIndex, allTracks, track, canvas, canvasCont
         const CANVAS_HEIGHT = GRID_HEIGHT * CELL_SIZE;
         canvas.width = CANVAS_WIDTH;
         canvas.height = CANVAS_HEIGHT;
-        
-        // Adjust container size for scroll
-        canvasContainer.style.width = `${CANVAS_WIDTH}px`;
-        canvasContainer.style.height = `${CANVAS_HEIGHT}px`;
-
 
         for (let y = 0; y < GRID_HEIGHT; y++) {
             let line = mapLines[y];

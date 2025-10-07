@@ -37,7 +37,7 @@ let isDrawingFinished = false; // For the track drawing view
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const canvasContainer = document.getElementById('canvasContainer');
-let CELL_SIZE = 12;
+let CELL_SIZE = 15;
 
 function bresenhamLine(x0, y0, x1, y1) {
     const points = [];

@@ -10,7 +10,6 @@ export function showView(viewId) {
 
 export function updateUI(gameState, myPlayerId) {
     if (!gameState) return;
-    document.getElementById('crashMessage').textContent = 'Debug: ' + JSON.stringify(gameState.players);
 
     document.getElementById('gameIdDisplay').textContent = `ID: ${gameState.gameHash}`;
     const playerColor = myPlayerId === 1 ? 'Blue' : 'Red';
